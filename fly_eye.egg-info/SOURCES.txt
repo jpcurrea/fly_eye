@@ -1,8 +1,0 @@
-setup.py
-fly_eye/__init__.py
-fly_eye.egg-info/PKG-INFO
-fly_eye.egg-info/SOURCES.txt
-fly_eye.egg-info/dependency_links.txt
-fly_eye.egg-info/not-zip-safe
-fly_eye.egg-info/requires.txt
-fly_eye.egg-info/top_level.txt
