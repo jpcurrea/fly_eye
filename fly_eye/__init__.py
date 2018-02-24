@@ -179,6 +179,7 @@ class Layer():
         if self.ellipse is None:
             self.getEyeSizes()
         (x, y), (w, h), ang = self.ellipse
+        self.angle = ang
         w = 1.05*w
         h = 1.05*h
         self.rr, self.cc = Ellipse(x, y, w/2., h/2.,
@@ -187,8 +188,8 @@ class Layer():
         out = np.copy(self.image)
         out = np.zeros(self.image.shape, dtype='uint8')
         out[self.cc, self.rr] = self.image[self.cc, self.rr]
-        self.eye = out
-        # self.eye = out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
+        # self.eye = out
+        self.eye = out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
         return self.eye
 
     def selectColor(self, range=None):
@@ -279,8 +280,10 @@ class Stack():
         fns = [os.path.join(dirname, f) for f in fns]
         fns = [f for f in fns if "focus" not in f.lower()]
         fns = sorted(fns)
+        fns = [f for f in fns if f.endswith(f_type)]
+        fns = [f for f in fns if os.path.split(f)[-1].startswith("._") is False]
         self.layers = [
-            Layer(f, bw) for f in fns if f.lower().endswith(f_type)
+            Layer(f, bw) for f in fns
         ]
         self.images = Queue(maxsize=len(self.layers))
         self.focuses = Queue(maxsize=len(self.layers))
