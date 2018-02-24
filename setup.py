@@ -5,7 +5,7 @@ setup(name="fly_eye",
       description='tools for anayzing images and video (as image stacks),\
       particularly for motion tracking, color keying, and processing of fruit\
       fly eye images.',
-      url="https://github.com/jpcurrea/image_analysis.git",
+      url="https://github.com/jpcurrea/fly_eye.git",
       author='Pablo Currea',
       author_email='johnpaulcurrea@gmail.com',
       license='MIT',
@@ -17,4 +17,5 @@ setup(name="fly_eye",
           'scikit-image',
           'opencv-python'
       ],
+      dependency_links=['https://github.com/jpcurrea/bird_call.git'],
       zip_safe=False)
