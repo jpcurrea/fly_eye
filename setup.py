@@ -15,7 +15,8 @@ setup(name="fly_eye",
           'scipy',
           'matplotlib',
           'scikit-image',
-          'opencv-python'
+          'opencv-python',
+          'fly_eye'
       ],
       dependency_links=['https://github.com/jpcurrea/bird_call.git'],
       zip_safe=False)
