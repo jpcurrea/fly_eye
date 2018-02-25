@@ -1,4 +1,5 @@
 import os
+import PIL
 from Queue import Queue
 import numpy as np
 import subprocess
@@ -12,16 +13,6 @@ from scipy import spatial, ndimage, stats
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.measurements import center_of_mass
 
-import bird_call as aud
-
-
-# import seaborn as sbn
-# sbn.set_style("white")
-
-# sbn.set_style("ticks")
-
-# activate_this_file = "/home/pbl/.virtualenvs/cv/bin/activate_this.py"
-# execfile(activate_this_file, dict(__file__=activate_this_file))
 import cv2
 
 
@@ -58,14 +49,21 @@ def interpMax(arr, heights=(0.,1.,2.)):
         - y2*(x1 - x3)
         + y3*(x2 - x3))
 
-    # zero_den = den == 0
-    max_heights = num/den
-
+    non_zero_den = den != 0
+    # print zero_den
+    max_heights = np.zeros(num.shape, dtype=float)
+    old_err_state = np.seterr(divide='raise')
+    ignor_states = np.seterr(**old_err_state)
+    max_heights = np.copy(num)
+    max_heights[non_zero_den] = max_heights[non_zero_den]/den[non_zero_den]
+    max_heights[non_zero_den is False] = 0
+    
+    # print np.isnan(max_heights).sum()
     # The maximum of the interpolation may lie outside the given height
     # values. If so, ouput the highest value from the data.
-    i = ((max_heights < max(heights))*(max_heights > min(heights))) is False
+    i = np.logical_or(
+        max_heights > max(heights), max_heights < min(heights)) 
     max_heights[i] = np.argmax(arr, axis=0)[i]
-
     return max_heights
 
 def insideAngle(A, B, C):
@@ -123,7 +121,12 @@ class Layer():
     def __init__(self, filename, bw=False):
         self.filename = filename
         self.bw = bw
-        self.image = None
+        if isinstance(self.filename, str):
+            self.image = PIL.Image.open(self.filename)
+        elif isinstance(self.filename, np.ndarray):
+            self.image = self.filename
+        else:
+            self.image = None
         self.sob = None
         self.eye_contour = None
         self.ellipse = None
@@ -132,13 +135,17 @@ class Layer():
         """Loads image if not done yet. This is so that we can loop through
         layers without redundantly loading the image.
         """
-        if self.image is None:
-            if isinstance(self.filename, str):
-                self.image = ndimage.imread(self.filename, flatten=self.bw)
-            elif isinstance(self.filename, np.ndarray):
-                self.image = self.filename
+        if isinstance(self.filename, str):
+            self.image = np.asarray(PIL.Image.open(self.filename))
+            # self.image = ndimage.imread(self.filename, flatten=self.bw)
+        elif isinstance(self.filename, np.ndarray):
+            self.image = np.asarray(self.filename)
         if self.image.ndim < 3:
             self.bw = True
+        if self.image.ndim <2:
+            self.image = None
+            print("file {} is not an appropriate format.".format(
+                self.filename))
         return self.image
 
     def focus(self):
@@ -282,9 +289,14 @@ class Stack():
         fns = sorted(fns)
         fns = [f for f in fns if f.endswith(f_type)]
         fns = [f for f in fns if os.path.split(f)[-1].startswith("._") is False]
-        self.layers = [
-            Layer(f, bw) for f in fns
-        ]
+        self.layers = []
+        for f in fns:
+            layer = Layer(f, bw)
+            if layer.image is not None:
+                self.layers += [layer]
+            else:
+                fns.remove(f)
+
         self.images = Queue(maxsize=len(self.layers))
         self.focuses = Queue(maxsize=len(self.layers))
         self.stack = None
@@ -321,10 +333,10 @@ class Stack():
         by the layer objects.
         """
         first = self.layers[0].load_image()
-        if len(first.shape) == 3:
+        if first.ndim == 3:
             l, w, d = first.shape
             images = np.zeros((3, l, w, d), first.dtype)
-        else:
+        elif first.ndim == 2:
             l, w = first.shape
             images = np.zeros((3, l, w), first.dtype)
         focuses = np.zeros((3, l, w), dtype=float)
@@ -385,31 +397,13 @@ class Stack():
                 sigma=sigma)).real
 
 
-class dialStack():
-    """A class for analyzing video of the depth dial attached to the
-    microscope.
+class dialStack(Stack):
+    """A special stack class for footage of the dial wheel on the microscope.
     """
-    def __init__(self, dirname="./", f_type=".bmp", bw=True):
+    def __init__(self, dirname, f_type, bw=True):
         self.dirname = dirname
-        fns = os.listdir(self.dirname)
-        fns = [os.path.join(dirname, f) for f in fns]
-        fns = [f for f in fns if "focus" not in f.lower()]
-        fns = sorted(fns)
-        self.layers = [Layer(f, bw) for f in fns if f.lower().endswith(f_type)]
-        self.bw = bw
-        self.average = None
-        self.detector = None
-
-    def getAverage(self, samples=50):
-        """Grab unmoving 'background' of this dial stack by averaging over
-        a sample of layers. The default is 50 samples.
-        """
-        first = self.layers[0].load_image()
-        res = np.zeros(first.shape, first.dtype)
-        intervals = len(self.layers)/samples
-        for l in self.layers[::intervals]:
-            res += (1./float(samples))*l.load_image()
-        self.average = res
+        self.f_type = f_type
+        Stack.__init__(self, self.dirname, f_type=self.f_type)
 
     def getMotion(self):
         """Measure the angle of rotation for the tick marks in this dial
@@ -505,6 +499,7 @@ class dialStack():
 
 
 class Video(Stack):
+    import bird_call as aud
     """Takes a stack of images and uses common functions to track motion or
     color."""
     def __init__(self, filename, fps=30, f_type=".jpg"):
