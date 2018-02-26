@@ -42,29 +42,31 @@ def interpMax(arr, heights=(0.,1.,2.)):
     x2 = float(x2)
     x3 = float(x3)
 
-    num = -(y1*(x2 - x3)*(-x2 - x3)
+    num =   -(y1*(x2 - x3)*(-x2 - x3)
             + y2*(x1 - x3)*(x1 + x3)
             + y3*(x1 - x2)*(-x1 - x2))
     den = 2. * (y1*(x2 - x3)
-        - y2*(x1 - x3)
-        + y3*(x2 - x3))
+             -  y2*(x1 - x3)
+             +  y3*(x2 - x3))
 
-    non_zero_den = den != 0
+    non_zero_den = np.array(den != 0, dtype=bool)
+    zero_den = np.array(den == 0, dtype=bool)
     # print zero_den
     max_heights = np.zeros(num.shape, dtype=float)
     old_err_state = np.seterr(divide='raise')
-    ignor_states = np.seterr(**old_err_state)
+    ignore_states = np.seterr(**old_err_state)
     max_heights = np.copy(num)
     max_heights[non_zero_den] = max_heights[non_zero_den]/den[non_zero_den]
-    max_heights[non_zero_den is False] = 0
-    
+    max_heights[zero_den] = 0
+
     # print np.isnan(max_heights).sum()
     # The maximum of the interpolation may lie outside the given height
     # values. If so, ouput the highest value from the data.
     i = np.logical_or(
-        max_heights > max(heights), max_heights < min(heights)) 
+        max_heights > max(heights), max_heights < min(heights))
     max_heights[i] = np.argmax(arr, axis=0)[i]
     return max_heights
+
 
 def insideAngle(A, B, C):
     CA = A - C
@@ -74,6 +76,7 @@ def insideAngle(A, B, C):
         angles += [np.dot(CA[x], CB[x]) / (norm(CA[x]) * norm(CB[x]))]
     angles = np.array(angles)
     return np.degrees(np.arccos(angles))
+
 
 def fitEllipse(x, y):
     x = x[:,np.newaxis]
@@ -137,12 +140,11 @@ class Layer():
         """
         if isinstance(self.filename, str):
             self.image = np.asarray(PIL.Image.open(self.filename))
-            # self.image = ndimage.imread(self.filename, flatten=self.bw)
         elif isinstance(self.filename, np.ndarray):
             self.image = np.asarray(self.filename)
         if self.image.ndim < 3:
             self.bw = True
-        if self.image.ndim <2:
+        if self.image.ndim < 2:
             self.image = None
             print("file {} is not an appropriate format.".format(
                 self.filename))
@@ -288,14 +290,18 @@ class Stack():
         fns = [f for f in fns if "focus" not in f.lower()]
         fns = sorted(fns)
         fns = [f for f in fns if f.endswith(f_type)]
-        fns = [f for f in fns if os.path.split(f)[-1].startswith("._") is False]
+        fns = [f for f in fns if os.path.split(f)[-1].startswith(".") is False]
         self.layers = []
         for f in fns:
             layer = Layer(f, bw)
+            layer.load_image()
             if layer.image is not None:
                 self.layers += [layer]
+                if len(self.layers) > 1000:
+                    layer.image = None
             else:
                 fns.remove(f)
+                print("File {} is not appropriate format for import".format(f))
 
         self.images = Queue(maxsize=len(self.layers))
         self.focuses = Queue(maxsize=len(self.layers))
@@ -332,61 +338,65 @@ class Stack():
         forms the focus stack using the sobel operator, which is generated
         by the layer objects.
         """
-        first = self.layers[0].load_image()
-        if first.ndim == 3:
-            l, w, d = first.shape
-            images = np.zeros((3, l, w, d), first.dtype)
-        elif first.ndim == 2:
-            l, w = first.shape
-            images = np.zeros((3, l, w), first.dtype)
-        focuses = np.zeros((3, l, w), dtype=float)
-        heights = focuses[0].astype(int)
-        images[0] = first
-        previous = self.layers[0].focus()
-        focuses[0] = previous
-        better = np.greater(focuses[0], focuses[1])
-        x = 1
-        for l in self.layers[1:]:
-            img = l.load_image()
-            foc = l.focus()
-            focuses[2, better] = foc[better]
-            images[2, better] = img[better]
-            better = np.greater(foc, focuses[1])
-            focuses[1, better] = foc[better]
-            images[1, better] = img[better]
-            heights[better] = x
-            focuses[0, better] = previous[better]
-            previous = foc
-            x += 1
-            printProgress(x, len(self.layers))
-        self.focuses = focuses
-        self.images = images
-        h = interpMax(focuses)
-        self.heights = (heights-1) + h
-        down = np.floor(h)
-        up = np.ceil(h)
-        up[up == 0] = 1
-        if self.bw:
-            down = down.flatten().reshape(first.shape)
-            up = up.flatten().reshape(first.shape)
-            h = h.flatten().reshape(first.shape)
+        if len(self.layers) == 0:
+            print("no images were properly imported")
         else:
-            down = down.flatten().repeat(3).reshape(first.shape)
-            up = up.flatten().repeat(3).reshape(first.shape)
-            h = h.flatten().repeat(3).reshape(first.shape)
-        down_img = np.zeros(first.shape)
-        up_img = np.zeros(first.shape)
-        for x in range(3):
-            down_img[np.where(down == x)] = images[x][np.where(down == x)]
-            up_img[np.where(up == x)] = images[x][np.where(up == x)]
-        stack = (up - h)*down_img + (h - down)*up_img
-        stack[np.where(h == 0)] = images[0][np.where(h == 0)]
-        stack[np.where(h == 1)] = images[1][np.where(h == 1)]
-        stack[np.where(h == 2)] = images[2][np.where(h == 2)]
-        self.stack = stack
-        if smooth > 0:
-            self.smooth(smooth)
-        print "done"
+            first = self.layers[0].load_image()
+            if first.ndim == 3:
+                l, w, d = first.shape
+                images = np.zeros((3, l, w, d), first.dtype)
+            elif first.ndim == 2:
+                l, w = first.shape
+                images = np.zeros((3, l, w), first.dtype)
+            focuses = np.zeros((3, l, w), dtype=float)
+            heights = focuses[0].astype(int)
+            images[0] = first
+            previous = self.layers[0].focus()
+            focuses[0] = previous
+            better = np.greater(focuses[0], focuses[1])
+            x = 1
+            for l in self.layers[1:]:
+                img = l.load_image()
+                foc = l.focus()
+                focuses[2, better] = foc[better]
+                images[2, better] = img[better]
+                better = np.greater(foc, focuses[1])
+                focuses[1, better] = foc[better]
+                images[1, better] = img[better]
+                heights[better] = x
+                focuses[0, better] = previous[better]
+                previous = foc
+                x += 1
+                printProgress(x, len(self.layers))
+            self.focuses = focuses
+            self.images = images
+            h = interpMax(focuses)
+            self.heights = (heights-1) + h
+            down = np.floor(h)
+            up = np.ceil(h)
+            up[up == 0] = 1
+            if self.bw:
+                down = down.flatten().reshape(first.shape)
+                up = up.flatten().reshape(first.shape)
+                h = h.flatten().reshape(first.shape)
+            else:
+                down = down.flatten().repeat(3).reshape(first.shape)
+                up = up.flatten().repeat(3).reshape(first.shape)
+                h = h.flatten().repeat(3).reshape(first.shape)
+            down_img = np.zeros(first.shape)
+            up_img = np.zeros(first.shape)
+            for x in range(3):
+                down_img[np.where(down == x)] = images[x][
+                    np.where(down == x)]
+                up_img[np.where(up == x)] = images[x][np.where(up == x)]
+            stack = (up - h)*down_img + (h - down)*up_img
+            stack[np.where(h == 0)] = images[0][np.where(h == 0)]
+            stack[np.where(h == 1)] = images[1][np.where(h == 1)]
+            stack[np.where(h == 2)] = images[2][np.where(h == 2)]
+            self.stack = stack
+            if smooth > 0:
+                self.smooth(smooth)
+            print "done"
 
     def smooth(self, sigma):
         """A 2d smoothing filter for the heights array"""
