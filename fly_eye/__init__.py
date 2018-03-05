@@ -150,7 +150,7 @@ class Layer():
                 self.filename))
         return self.image
 
-    def focus(self):
+    def focus(self, smooth=0):
         """Measures the relative focus of each pixel using the Sobel 
         operator.
         """
@@ -167,6 +167,8 @@ class Layer():
         sob = np.hypot(sx, sy)
         self.image = None
         self.sob = sob
+        if smooth > 0:
+            sob = ndimage.filters.gaussian_filter(sob, sigma=smooth)
         return sob
 
     def generateMask(self, thresh=50, b_ground=None):
@@ -195,8 +197,8 @@ class Layer():
                                    shape=self.image.shape[:2],
                                    rotation=np.deg2rad(ang))
         out = np.copy(self.image)
-        out = np.zeros(self.image.shape, dtype='uint8')
-        out[self.cc, self.rr] = self.image[self.cc, self.rr]
+        # out = np.zeros(self.image.shape, dtype='uint8')
+        # out[self.cc, self.rr] = self.image[self.cc, self.rr]
         # self.eye = out
         self.eye = out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
         return self.eye
@@ -333,7 +335,8 @@ class Stack():
             l.image = None
         return samples**-1*res
 
-    def focusStack(self, smooth=0):
+    def focusStack(self, smooth=0, interpolate=True, use_all=False,
+                   layer_smooth=0):
         """The main method which compares the layers of the stack and
         forms the focus stack using the sobel operator, which is generated
         by the layer objects.
@@ -341,61 +344,83 @@ class Stack():
         if len(self.layers) == 0:
             print("no images were properly imported")
         else:
-            first = self.layers[0].load_image()
-            if first.ndim == 3:
-                l, w, d = first.shape
-                images = np.zeros((3, l, w, d), first.dtype)
-            elif first.ndim == 2:
-                l, w = first.shape
-                images = np.zeros((3, l, w), first.dtype)
-            focuses = np.zeros((3, l, w), dtype=float)
-            heights = focuses[0].astype(int)
-            images[0] = first
-            previous = self.layers[0].focus()
-            focuses[0] = previous
-            better = np.greater(focuses[0], focuses[1])
-            x = 1
-            for l in self.layers[1:]:
-                img = l.load_image()
-                foc = l.focus()
-                focuses[2, better] = foc[better]
-                images[2, better] = img[better]
-                better = np.greater(foc, focuses[1])
-                focuses[1, better] = foc[better]
-                images[1, better] = img[better]
-                heights[better] = x
-                focuses[0, better] = previous[better]
-                previous = foc
-                x += 1
-                printProgress(x, len(self.layers))
-            self.focuses = focuses
-            self.images = images
-            h = interpMax(focuses)
-            self.heights = (heights-1) + h
-            down = np.floor(h)
-            up = np.ceil(h)
-            up[up == 0] = 1
-            if self.bw:
-                down = down.flatten().reshape(first.shape)
-                up = up.flatten().reshape(first.shape)
-                h = h.flatten().reshape(first.shape)
+            if use_all:
+                self.images = []
+                self.focuses = []
+                for layer in self.layers:
+                    self.images += [layer.load_image()]
+                    self.focuses += [layer.focus(smooth=layer_smooth)]
+                self.focuses = np.array(self.focuses)
+                self.images = np.array(self.images)
+                if interpolate:
+                    print("this is not available yet")
+                else:
+                    top_focus = np.argmax(self.focuses, axis=0)
+                    self.stack = np.zeros(self.images.shape[1:],
+                                          dtype='uint8')
+                    for val in set(top_focus.flatten()):
+                        coords = top_focus == val
+                        self.stack[coords] = self.images[val][coords]
             else:
-                down = down.flatten().repeat(3).reshape(first.shape)
-                up = up.flatten().repeat(3).reshape(first.shape)
-                h = h.flatten().repeat(3).reshape(first.shape)
-            down_img = np.zeros(first.shape)
-            up_img = np.zeros(first.shape)
-            for x in range(3):
-                down_img[np.where(down == x)] = images[x][
-                    np.where(down == x)]
-                up_img[np.where(up == x)] = images[x][np.where(up == x)]
-            stack = (up - h)*down_img + (h - down)*up_img
-            stack[np.where(h == 0)] = images[0][np.where(h == 0)]
-            stack[np.where(h == 1)] = images[1][np.where(h == 1)]
-            stack[np.where(h == 2)] = images[2][np.where(h == 2)]
-            self.stack = stack
-            if smooth > 0:
-                self.smooth(smooth)
+                first = self.layers[0].load_image()
+                if first.ndim == 3:
+                    l, w, d = first.shape
+                    images = np.zeros((3, l, w, d), first.dtype)
+                elif first.ndim == 2:
+                    l, w = first.shape
+                    images = np.zeros((3, l, w), first.dtype)
+                focuses = np.zeros((3, l, w), dtype=float)
+                heights = focuses[0].astype(int)
+                images[0] = first
+                previous = self.layers[0].focus()
+                focuses[0] = previous
+                better = np.greater(focuses[0], focuses[1])
+                x = 1
+                for l in self.layers[1:]:
+                    img = l.load_image()
+                    foc = l.focus(smooth=layer_smooth)
+                    focuses[2, better] = foc[better]
+                    images[2, better] = img[better]
+                    better = np.greater(foc, focuses[1])
+                    focuses[1, better] = foc[better]
+                    images[1, better] = img[better]
+                    heights[better] = x
+                    focuses[0, better] = previous[better]
+                    previous = foc
+                    x += 1
+                    printProgress(x, len(self.layers))
+                self.focuses = focuses
+                self.images = images
+                h = interpMax(focuses)
+                self.heights = (heights-1) + h
+                if interpolate:
+                    down = np.floor(h)
+                    up = np.ceil(h)
+                    up[up == 0] = 1
+                    if self.bw:
+                        down = down.flatten().reshape(first.shape)
+                        up = up.flatten().reshape(first.shape)
+                        h = h.flatten().reshape(first.shape)
+                    else:
+                        down = down.flatten().repeat(3).reshape(first.shape)
+                        up = up.flatten().repeat(3).reshape(first.shape)
+                        h = h.flatten().repeat(3).reshape(first.shape)
+                    down_img = np.zeros(first.shape)
+                    up_img = np.zeros(first.shape)
+                    for x in range(3):
+                        down_img[np.where(down == x)] = images[x][
+                            np.where(down == x)]
+                        up_img[np.where(up == x)] = images[x][
+                            np.where(up == x)]
+                    stack = (up - h)*down_img + (h - down)*up_img
+                    stack[np.where(h == 0)] = images[0][np.where(h == 0)]
+                    stack[np.where(h == 1)] = images[1][np.where(h == 1)]
+                    stack[np.where(h == 2)] = images[2][np.where(h == 2)]
+                    self.stack = stack
+                    if smooth > 0:
+                        self.smooth(smooth)
+                else:
+                    self.stack = self.images[1]
             print "done"
 
     def smooth(self, sigma):
@@ -549,7 +574,7 @@ class Video(Stack):
                      "-ar", "44100",
                      "-ab", "128",
                      "-vn", audio_fname])
-                self.audio = aud.Recording(audio_fname, trim=False)
+                self.audio = self.aud.Recording(audio_fname, trim=False)
             except subprocess.CalledProcessError:
                 print("failed to get audio from video!")
                 return False
