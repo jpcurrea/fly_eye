@@ -125,7 +125,7 @@ class Layer():
         self.filename = filename
         self.bw = bw
         if isinstance(self.filename, str):
-            self.image = PIL.Image.open(self.filename)
+            self.image = None
         elif isinstance(self.filename, np.ndarray):
             self.image = self.filename
         else:
