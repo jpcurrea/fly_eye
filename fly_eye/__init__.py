@@ -748,7 +748,7 @@ class colorSelector():
             h_std = stats.circstd(self.hsv[:, :, 0].flatten(), 0, 1)
             m = np.append(h_mean, m)
             sd = np.append(h_std, sd)
-            self.colors = np.array([m-3*sd, m+3*sd])
+            self.colors = np.array([m-2*sd, m+2*sd])
             self.keyed = self.selectColor()
             self.img.set_array(self.keyed)
             self.hue_dist = list(np.histogram(
