@@ -296,14 +296,15 @@ class Stack():
         self.layers = []
         for f in fns:
             layer = Layer(f, bw)
-            layer.load_image()
-            if layer.image is not None:
-                self.layers += [layer]
-                if len(self.layers) > 1000:
-                    layer.image = None
-            else:
-                fns.remove(f)
-                print("File {} is not appropriate format for import".format(f))
+            self.layers.append(layer)
+            # layer.load_image()
+            # if layer.image is not None:
+            #     self.layers += [layer]
+            #     if len(self.layers) > 1000:
+            #         layer.image = None
+            # else:
+            #     fns.remove(f)
+            #     print("File {} is not appropriate format for import".format(f))
 
         self.images = Queue(maxsize=len(self.layers))
         self.focuses = Queue(maxsize=len(self.layers))
