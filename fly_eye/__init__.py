@@ -304,6 +304,7 @@ class Layer():
                 self.cs.mask,
                 cv2.RETR_TREE,
                 cv2.CHAIN_APPROX_SIMPLE)
+            self.conts = conts
             cont = max(conts, key=cv2.contourArea)
             self.eye_contour = cont.reshape((cont.shape[0], cont.shape[-1]))
 
