@@ -6,6 +6,7 @@ import subprocess
 
 from matplotlib import colors
 from matplotlib import pyplot as plt
+from matplotlib import mlab
 from skimage.draw import ellipse as Ellipse
 
 from numpy.linalg import eig, inv, norm
@@ -113,6 +114,91 @@ def setRadSpan(a1, a2, R=1, n = 100):
     res[0,1] = R
     res[n+1:, 1] = R
     return res
+
+def local_maxima(img, p=5, window=10, min_diff=None,
+                 disp=True):
+    max_windows = ndimage.filters.maximum_filter(img, window)
+    maxima = (img == max_windows)
+    min_windows = ndimage.filters.minimum_filter(img, window)
+    diffs = max_windows - min_windows
+    if disp:
+        sbn.distplot(diffs.flatten())
+        axvline(np.percentile(diffs.flatten(), p))
+    if min_diff is None:
+        cutoff = np.percentile(diffs.flatten(), p)
+        delta = diffs > cutoff
+    else:
+        delta = diffs > min_diff
+    # return max_windows - min_windows
+
+    maxima[delta == 0] = 0
+
+    labeled, num_objects = ndimage.label(maxima)
+    slices = ndimage.find_objects(labeled)
+    x, y = [], []
+    for dy, dx in slices:
+        x_center = (dx.start + dx.stop - 1)/2
+        x.append(x_center)
+        y_center = (dy.start + dy.stop - 1)/2
+        y.append(y_center)
+
+    vals = img[y, x]
+    ind = np.argsort(vals)
+
+    x = np.array(x)
+    y = np.array(y)
+
+    return x[ind][::-1], y[ind][::-1]
+
+
+def fundamental_maxima(img, disp=True, p=5):
+    # img = img - img.mean()
+    l, w = img.shape[:2]
+    # fft = np.fft.fft2(img)
+    # fshift = np.fft.fftshift(fft)
+    fshift = np.copy(img)
+    fshift[:, :w/2] = 0
+    # fshift[l/2, w/2] = 0
+    # if disp:
+    #     subplot(131)
+    x, y = local_maxima(abs(fshift), p=p, disp=False)
+
+    if disp:
+        plt.subplot(131)
+        fs = np.copy(abs(fshift))
+        fs[l/2, w/2] = 0
+        plt.imshow(abs(fs))
+        plt.plot(x, y, 'bo')
+
+    points = np.array([x, y])
+    num = points.shape[1]
+    points = points[:, :min(num, 5)]
+
+    points = points.T
+    tree = spatial.KDTree(points)
+    distance, index = tree.query((l/2, w/2), k=4)
+
+    i = distance > 1
+    distance = distance[i]
+    index = index[i]
+
+    # return distance, index
+
+    inds = points[index].T
+    key_freqs = fshift[inds[1], inds[0]]
+    new_fshift = np.zeros(fshift.shape, dtype=complex)
+    new_fshift[inds[1], inds[0]] = key_freqs/abs(key_freqs)
+    new_fft = np.fft.ifftshift(new_fshift)
+    new_img = np.fft.ifft2(new_fft).real
+    if disp:
+        plt.plot(inds[0], inds[1], 'r.')
+        plt.subplot(132)
+        plt.imshow(new_img)
+    x, y = local_maxima(-new_img, p=5, window=5, disp=False)
+    if disp:
+        plt.plot(x, y, 'ro')
+
+    return x, y
 
 
 class Layer():
@@ -256,6 +342,43 @@ class Layer():
                 plt.plot(p[0], p[1], 'b.')
             # plt.show()
         return self.ommatidial_dists
+
+    def get_ommatidia(self, overlap=5, window_length=100):
+        eye = self.crop_eye()
+        eye_sats = colors.rgb_to_hsv(eye.astype('uint8'))
+
+        sections = rolling_window(eye_sats, (window_length, window_length))
+        sections = sections[::overlap, ::overlap]
+
+        eye_ffts = np.fft.fft2(sections)
+
+        gauss = mlab.normpdf(np.arange(window_length), window_length/2, .3*window_length)
+        gauss = np.repeat(gauss, window_length).reshape((window_length, window_length))
+        gauss = gauss * gauss.T
+        gauss /= gauss.max()
+        gauss = (np.round(100*gauss, 0)).astype(int)
+
+        footprint = [[False, True, False],
+                     [True, True, True],
+                     [False, True, False]]
+
+        centers = np.zeros(eye_sats.shape, dtype=int)
+        for row in range(sections.shape[0]):
+            for col in range(sections.shape[1]):
+                x, y = fundamental_maxima(
+                    np.fft.fftshift(eye_ffts[row, col]),
+                    disp=False)
+                x = np.array(x)
+                y = np.array(y)
+                if len(x) > 0:
+                    section_centers = np.zeros((window_length, window_length), int)
+                    section_centers[y, x] = gauss[y, x]
+                    section_centers = ndimage.grey_dilation(section_centers,
+                                                            footprint=footprint)
+                    centers[row * overlap : row * overlap + window_length,
+                            col * overlap : col * overlap + window_length] += section_centers
+
+        self.ommatidia = np.array(local_maxima(centers))
 
     def startBlobDetector(
             self, filterByArea=True, minArea=14400, maxArea=422500,
