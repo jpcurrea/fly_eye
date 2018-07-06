@@ -3,6 +3,7 @@ import PIL
 from Queue import Queue
 import numpy as np
 import subprocess
+import seaborn as sbn
 
 from matplotlib import colors
 from matplotlib import pyplot as plt
@@ -15,7 +16,7 @@ from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.measurements import center_of_mass
 
 import cv2
-
+from rolling_window import rolling_window
 
 def rgb2gray(rgb):
     return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
@@ -174,30 +175,34 @@ def fundamental_maxima(img, disp=True, p=5):
     num = points.shape[1]
     points = points[:, :min(num, 5)]
 
-    points = points.T
-    tree = spatial.KDTree(points)
-    distance, index = tree.query((l/2, w/2), k=4)
+    if len(points.T) > 3:
+        points = points.T
+        tree = spatial.KDTree(points)
+        distance, index = tree.query((l/2, w/2), k=4)
 
-    i = distance > 1
-    distance = distance[i]
-    index = index[i]
+        i = distance > 1
+        distance = distance[i]
+        index = index[i]
 
-    # return distance, index
+        # return distance, index
+    
+        inds = points[index].T
+        key_freqs = fshift[inds[1], inds[0]]
+        new_fshift = np.zeros(fshift.shape, dtype=complex)
+        new_fshift[inds[1], inds[0]] = key_freqs/abs(key_freqs)
+        new_fft = np.fft.ifftshift(new_fshift)
+        new_img = np.fft.ifft2(new_fft).real
+        if disp:
+            plt.plot(inds[0], inds[1], 'r.')
+            plt.subplot(132)
+            plt.imshow(new_img)
+        x, y = local_maxima(-new_img, p=5, window=5, disp=False)
+        if disp:
+            plt.plot(x, y, 'ro')
 
-    inds = points[index].T
-    key_freqs = fshift[inds[1], inds[0]]
-    new_fshift = np.zeros(fshift.shape, dtype=complex)
-    new_fshift[inds[1], inds[0]] = key_freqs/abs(key_freqs)
-    new_fft = np.fft.ifftshift(new_fshift)
-    new_img = np.fft.ifft2(new_fft).real
-    if disp:
-        plt.plot(inds[0], inds[1], 'r.')
-        plt.subplot(132)
-        plt.imshow(new_img)
-    x, y = local_maxima(-new_img, p=5, window=5, disp=False)
-    if disp:
-        plt.plot(x, y, 'ro')
-
+    else:
+        x = []
+        y = []
     return x, y
 
 
@@ -270,17 +275,17 @@ class Layer():
         mask = ndimage.morphology.binary_dilation(thresh).astype("uint8")
         self.mask = 255*mask
 
-    def crop_eye(self):
+    def crop_eye(self, padding=1.05):
         if self.image is None:
             self.load_image()
         if self.ellipse is None:
             self.getEyeSizes()
         (x, y), (w, h), ang = self.ellipse
         self.angle = ang
-        w = 1.05*w
-        h = 1.05*h
+        w = padding*w
+        h = padding*h
         self.rr, self.cc = Ellipse(x, y, w/2., h/2.,
-                                   shape=self.image.shape[:2],
+                                   shape=self.image.shape[:2][::-1],
                                    rotation=np.deg2rad(ang))
         out = np.copy(self.image)
         # out = np.zeros(self.image.shape, dtype='uint8')
@@ -303,10 +308,16 @@ class Layer():
             im, conts, h = cv2.findContours(
                 self.cs.mask,
                 cv2.RETR_TREE,
-                cv2.CHAIN_APPROX_SIMPLE)
+                cv2.CHAIN_APPROX_NONE)
             self.conts = conts
             cont = max(conts, key=cv2.contourArea)
+            self.cont = cont
             self.eye_contour = cont.reshape((cont.shape[0], cont.shape[-1]))
+            mask = np.zeros(self.cs.mask.shape, int)
+            mask[self.eye_contour[:, 1], self.eye_contour[:, 0]] = 1
+            vert1 = np.cumsum(mask, axis=0)
+            vert2 = np.cumsum(mask[::-1], axis=0)[::-1]
+            self.eye_mask = (vert1 * vert2) > 0
 
     def getEyeSizes(self, disp=True):
         if self.eye_contour is None:
@@ -345,24 +356,27 @@ class Layer():
         return self.ommatidial_dists
 
     def get_ommatidia(self, overlap=5, window_length=100):
-        eye = self.crop_eye()
-        eye_sats = colors.rgb_to_hsv(eye.astype('uint8'))
+        eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, 2]
+        if self.eye_contour is None:
+            self.getEyeOutline()
+        eye_sats[self.eye_mask == False] = eye_sats[self.eye_mask].mean()
 
         sections = rolling_window(eye_sats, (window_length, window_length))
         sections = sections[::overlap, ::overlap]
 
+        print("computing fourier transforms of windows")
         eye_ffts = np.fft.fft2(sections)
+        print("done")
 
-        gauss = mlab.normpdf(np.arange(window_length), window_length/2, .3*window_length)
-        gauss = np.repeat(gauss, window_length).reshape((window_length, window_length))
+        gauss = stats.norm.pdf(np.arange(window_length), window_length/2,
+                               .2*window_length)
+        gauss = np.repeat(gauss, window_length).reshape((
+            window_length, window_length))
         gauss = gauss * gauss.T
         gauss /= gauss.max()
         gauss = (np.round(100*gauss, 0)).astype(int)
 
-        footprint = [[False, True, False],
-                     [True, True, True],
-                     [False, True, False]]
-
+        print("finding fundamental gratings of each window")
         centers = np.zeros(eye_sats.shape, dtype=int)
         for row in range(sections.shape[0]):
             for col in range(sections.shape[1]):
@@ -374,12 +388,13 @@ class Layer():
                 if len(x) > 0:
                     section_centers = np.zeros((window_length, window_length), int)
                     section_centers[y, x] = gauss[y, x]
-                    section_centers = ndimage.grey_dilation(section_centers,
-                                                            footprint=footprint)
                     centers[row * overlap : row * overlap + window_length,
                             col * overlap : col * overlap + window_length] += section_centers
-
-        self.ommatidia = np.array(local_maxima(centers))
+            printProgress(row, sections.shape[0])
+        self.centers = np.zeros(centers.shape, int)
+        self.centers[self.eye_mask] = ndimage.filters.gaussian_filter(
+            centers, sigma=3)[self.eye_mask]
+        self.ommatidia = np.array(local_maxima(self.centers, disp=False))
 
     def startBlobDetector(
             self, filterByArea=True, minArea=14400, maxArea=422500,
