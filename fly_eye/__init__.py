@@ -18,11 +18,11 @@ from scipy.ndimage.measurements import center_of_mass
 import cv2
 from rolling_window import rolling_window
 
-def rgb2gray(rgb):
+def rgb_2_gray(rgb):
     return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
 
 
-def printProgress(part, whole):
+def print_progress(part, whole):
     import sys
     prop = float(part)/float(whole)
     sys.stdout.write('\r')
@@ -30,7 +30,7 @@ def printProgress(part, whole):
     sys.stdout.flush()
 
 
-def interpMax(arr, heights=(0.,1.,2.)):
+def interpolate_max(arr, heights=(0.,1.,2.)):
     """Given 3 points or arrays, and their corresponding height
     coordinates, calculate the maximum of the Lagrange polynomial
     interpolation of those points. Useful for fast calculations.
@@ -70,7 +70,7 @@ def interpMax(arr, heights=(0.,1.,2.)):
     return max_heights
 
 
-def insideAngle(A, B, C):
+def inside_angle(A, B, C):
     CA = A - C
     CB = B - C
     angles = []
@@ -80,7 +80,7 @@ def insideAngle(A, B, C):
     return np.degrees(np.arccos(angles))
 
 
-def fitEllipse(x, y):
+def fit_ellipse(x, y):
     x = x[:,np.newaxis]
     y = y[:,np.newaxis]
     D =  np.hstack((x*x, x*y, y*y, x, y, np.ones_like(x)))
@@ -99,12 +99,7 @@ def ellipse_center(a):
     y0=(a*f-b*d)/num
     return np.array([x0,y0])
 
-def movingaverage (values, window):
-    weights = np.repeat(1.0, window)/window
-    sma = np.convolve(values, weights, 'valid')
-    return sma
-
-def setRadSpan(a1, a2, R=1, n = 100):
+def set_radius_span(a1, a2, R=1, n = 100):
     vals = np.linspace(a1, a2, n)
     vals.sort()
     res = np.zeros((n*2+3, 2))
@@ -124,7 +119,7 @@ def local_maxima(img, p=5, window=10, min_diff=None,
     diffs = max_windows - min_windows
     if disp:
         sbn.distplot(diffs.flatten())
-        axvline(np.percentile(diffs.flatten(), p))
+        plt.axvline(np.percentile(diffs.flatten(), p))
     if min_diff is None:
         cutoff = np.percentile(diffs.flatten(), p)
         delta = diffs > cutoff
@@ -152,7 +147,7 @@ def local_maxima(img, p=5, window=10, min_diff=None,
     return x[ind][::-1], y[ind][::-1]
 
 
-def fundamental_maxima(img, disp=True, p=5):
+def fundamental_maxima(img, disp=True, p=5, window=5):
     # img = img - img.mean()
     l, w = img.shape[:2]
     # fft = np.fft.fft2(img)
@@ -162,7 +157,7 @@ def fundamental_maxima(img, disp=True, p=5):
     # fshift[l/2, w/2] = 0
     # if disp:
     #     subplot(131)
-    x, y = local_maxima(abs(fshift), p=p, disp=False)
+    x, y = local_maxima(abs(fshift), p=p, disp=False, window=window)
 
     if disp:
         plt.subplot(131)
@@ -208,8 +203,7 @@ def fundamental_maxima(img, disp=True, p=5):
 
 class Layer():
 
-    """A multi-purpose class used for images that is efficient for
-    processing video frames.
+    """A multi-purpose class used for processing images.
     """
 
     def __init__(self, filename, bw=False):
@@ -222,8 +216,6 @@ class Layer():
         else:
             self.image = None
         self.sob = None
-        self.eye_contour = None
-        self.ellipse = None
 
     def load_image(self):
         """Loads image if not done yet. This is so that we can loop through
@@ -250,7 +242,7 @@ class Layer():
         # image = self.load_image()
         # print self.image
         if not self.bw:
-            gray = rgb2gray(self.image)
+            gray = rgb_2_gray(self.image)
         else:
             gray = self.image
         sx = ndimage.filters.sobel(gray, axis=0, mode='constant')
@@ -262,7 +254,7 @@ class Layer():
             sob = ndimage.filters.gaussian_filter(sob, sigma=smooth)
         return sob
 
-    def generateMask(self, thresh=50, b_ground=None):
+    def generate_mask(self, thresh=50, b_ground=None):
         """Generates a masking image by thresholding the image. If a
         background is provided, this will also subtract the background
         before generating the mask.
@@ -275,35 +267,52 @@ class Layer():
         mask = ndimage.morphology.binary_dilation(thresh).astype("uint8")
         self.mask = 255*mask
 
-    def crop_eye(self, padding=1.05):
+    def select_color(self, range=None):
         if self.image is None:
             self.load_image()
-        if self.ellipse is None:
-            self.getEyeSizes()
-        (x, y), (w, h), ang = self.ellipse
-        self.angle = ang
-        w = padding*w
-        h = padding*h
-        self.rr, self.cc = Ellipse(x, y, w/2., h/2.,
-                                   shape=self.image.shape[:2][::-1],
-                                   rotation=np.deg2rad(ang))
-        out = np.copy(self.image)
-        # out = np.zeros(self.image.shape, dtype='uint8')
-        # out[self.cc, self.rr] = self.image[self.cc, self.rr]
-        # self.eye = out
-        self.eye = out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
-        return self.eye
-
-    def selectColor(self, range=None):
-        if self.image is None:
-            self.load_image()
-        self.cs = colorSelector(self.image)
-        self.cs.startUp()
+        self.cs = ColorSelector(self.image)
+        self.cs.start_up()
         while self.cs.displaying():
             pass
 
-    def getEyeOutline(self):
-        self.selectColor()
+    def start_blob_detector(
+            self, filterByArea=True, minArea=14400, maxArea=422500,
+            filterByConvexity=True, minConvexity=.8,
+            filterByInertia=False, minInertiaRatio=.05,
+            maxInertiaRatio=.25, filterByCircularity=False,
+            maxThreshold=256, minThreshold=50):
+        """Set up the Blob detector with default params for detecting the
+        ticks from our first video.
+        """
+        self.params = cv2.SimpleBlobDetector_Params()
+        self.minThreshold = minThreshold
+        self.maxThreshold = maxThreshold
+        self.params.filterByArea = filterByArea
+        self.params.minArea = minArea
+        self.params.maxArea = maxArea
+        self.params.filterByConvexity = filterByConvexity
+        self.params.minConvexity = minConvexity
+        self.params.filterByInertia = filterByInertia
+        self.params.minInertiaRatio = minInertiaRatio
+        self.params.maxInertiaRatio = maxInertiaRatio
+        self.params.filterByCircularity = filterByCircularity
+        self.detector = cv2.SimpleBlobDetector_create(self.params)
+
+
+class Eye(Layer):
+
+    """A class specifically used for processing images of fly eyes. Maybe
+    could be modified for other eyes (square lattice, for instance)
+    """
+
+    def __init__(self, filename, bw=False):
+        Layer.__init__(self, filename, bw)
+        self.eye_contour = None
+        self.ellipse = None
+        self.ommatidia = None
+
+    def get_eye_outline(self):
+        self.select_color()
         if self.cs.mask is not None:
             im, conts, h = cv2.findContours(
                 self.cs.mask,
@@ -319,9 +328,9 @@ class Layer():
             vert2 = np.cumsum(mask[::-1], axis=0)[::-1]
             self.eye_mask = (vert1 * vert2) > 0
 
-    def getEyeSizes(self, disp=True):
+    def get_eye_sizes(self, disp=True):
         if self.eye_contour is None:
-            self.getEyeOutline()
+            self.get_eye_outline()
         self.ellipse = cv2.fitEllipse(self.eye_contour)
         self.eye_length = max(self.ellipse[1])
         self.eye_width = min(self.ellipse[1])
@@ -331,34 +340,29 @@ class Layer():
             plt.plot(self.eye_contour[:, 0], self.eye_contour[:, 1])
             plt.show()
 
-    def get_ommatidial_diameter(self, disp=True):
-        self.crop_eye()
-        val = colors.rgb_to_hsv(self.eye)[:, :, 2]
-        val = rgb2gray(self.eye)
-        self.blurred = gaussian_filter(val, sigma=1)
-        self.startBlobDetector(minArea=5, maxArea=400, maxThreshold=256,
-                               minThreshold=20)
-        self.ommatidia = self.detector.detect(self.blurred.astype('uint8'))
-        points = np.array([k.pt for k in self.ommatidia])
-        self.tree = spatial.KDTree(points)
-        dists, inds = self.tree.query(points, k=7)
-        dists = dists.T[1:].flatten()
-        nan = np.isnan(dists)
-        not_nan = nan is False
-        not_inf = dists != np.inf
-        not_0 = dists > 0
-        self.ommatidial_dists = dists[not_nan & not_inf & not_0]
-        if disp is True:
-            plt.imshow(self.eye.astype('uint8'))
-            for p in points:
-                plt.plot(p[0], p[1], 'b.')
-            # plt.show()
-        return self.ommatidial_dists
+    def crop_eye(self, padding=1.05):
+        if self.image is None:
+            self.load_image()
+        if self.ellipse is None:
+            self.get_eye_sizes()
+        (x, y), (w, h), ang = self.ellipse
+        self.angle = ang
+        w = padding*w
+        h = padding*h
+        self.rr, self.cc = Ellipse(x, y, w/2., h/2.,
+                                   shape=self.image.shape[:2][::-1],
+                                   rotation=np.deg2rad(ang))
+        out = np.copy(self.image)
+        # out = np.zeros(self.image.shape, dtype='uint8')
+        # out[self.cc, self.rr] = self.image[self.cc, self.rr]
+        # self.eye = out
+        self.eye = out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
+        return self.eye
 
     def get_ommatidia(self, overlap=5, window_length=100):
         eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, 2]
         if self.eye_contour is None:
-            self.getEyeOutline()
+            self.get_eye_sizes(disp=False)
         eye_sats[self.eye_mask == False] = eye_sats[self.eye_mask].mean()
 
         sections = rolling_window(eye_sats, (window_length, window_length))
@@ -386,38 +390,38 @@ class Layer():
                 x = np.array(x)
                 y = np.array(y)
                 if len(x) > 0:
-                    section_centers = np.zeros((window_length, window_length), int)
+                    section_centers = np.zeros((window_length, window_length),
+                                               int)
                     section_centers[y, x] = gauss[y, x]
-                    centers[row * overlap : row * overlap + window_length,
-                            col * overlap : col * overlap + window_length] += section_centers
-            printProgress(row, sections.shape[0])
+                    centers[row * overlap: row * overlap + window_length,
+                            col * overlap: col * overlap + window_length] += section_centers
+            print_progress(row, sections.shape[0])
         self.centers = np.zeros(centers.shape, int)
         self.centers[self.eye_mask] = ndimage.filters.gaussian_filter(
             centers, sigma=3)[self.eye_mask]
         self.ommatidia = np.array(local_maxima(self.centers, disp=False))
 
-    def startBlobDetector(
-            self, filterByArea=True, minArea=14400, maxArea=422500,
-            filterByConvexity=True, minConvexity=.8,
-            filterByInertia=False, minInertiaRatio=.05,
-            maxInertiaRatio=.25, filterByCircularity=False,
-            maxThreshold=256, minThreshold=50):
-        """Set up the Blob detector with default params for detecting the
-        ticks from our first video.
-        """
-        self.params = cv2.SimpleBlobDetector_Params()
-        self.minThreshold = minThreshold
-        self.maxThreshold = maxThreshold
-        self.params.filterByArea = filterByArea
-        self.params.minArea = minArea
-        self.params.maxArea = maxArea
-        self.params.filterByConvexity = filterByConvexity
-        self.params.minConvexity = minConvexity
-        self.params.filterByInertia = filterByInertia
-        self.params.minInertiaRatio = minInertiaRatio
-        self.params.maxInertiaRatio = maxInertiaRatio
-        self.params.filterByCircularity = filterByCircularity
-        self.detector = cv2.SimpleBlobDetector_create(self.params)
+    def get_ommatidial_diameter(self, disp=True, k_neighbors=7, radius=100):
+        if self.ommatidia is None:
+            self.get_ommatidia()
+        self.tree = spatial.KDTree(self.ommatidia.T)
+        dists, inds = self.tree.query(self.ommatidia.T, k=k_neighbors+1)
+        dists = dists[:, 1:]
+        meds = np.repeat(np.median(dists, axis=1),
+                         k_neighbors).reshape(dists.shape)
+        too_small = dists < .2*meds
+        dists[too_small] = np.nan
+        mins = np.repeat(np.nanmin(dists, axis=1),
+                         k_neighbors).reshape(dists.shape)
+        magn = dists / mins
+        too_large = magn > 1.75
+        dists[too_large] = np.nan
+        self.ommatidial_dists = np.nanmean(dists, axis=1)
+
+        (x, y), (w, h), ang = self.ellipse
+        near_center = self.tree.query_ball_point([x, y], r=radius)
+
+        self.ommatidial_diameter = self.ommatidial_dists[near_center].mean()
 
 
 class Stack():
@@ -450,19 +454,7 @@ class Stack():
         self.stack = None
         self.bw = bw
 
-    def getEyeMeasurements(self, disp=True):
-        self.subjects = []
-        self.ommatidial_lengths = []
-        self.eye_lengths = []
-        self.eye_widths = []
-        for layer in self.layers:
-            self.subjects += [
-                os.path.split(layer.filename)[-1].split(".")[0]]
-            layer.getEyeSizes(disp=disp)
-            self.ommatidial_lengths += [
-                np.median(layer.get_ommatidial_diameter(disp=disp))]
-
-    def getAverage(self, samples=50):
+    def get_average(self, samples=50):
         """Grab unmoving 'background' of the stack by averaging over
         a sample of layers. The default is 50 samples.
         """
@@ -475,8 +467,8 @@ class Stack():
             l.image = None
         return samples**-1*res
 
-    def focusStack(self, smooth=0, interpolate=True, use_all=False,
-                   layer_smooth=0):
+    def focus_stack(self, smooth=0, interpolate=True, use_all=False,
+                    layer_smooth=0):
         """The main method which compares the layers of the stack and
         forms the focus stack using the sobel operator, which is generated
         by the layer objects.
@@ -528,10 +520,10 @@ class Stack():
                     focuses[0, better] = previous[better]
                     previous = foc
                     x += 1
-                    printProgress(x, len(self.layers))
+                    print_progress(x, len(self.layers))
                 self.focuses = focuses
                 self.images = images
-                h = interpMax(focuses)
+                h = interpolate_max(focuses)
                 self.heights = (heights-1) + h
                 if interpolate:
                     down = np.floor(h)
@@ -572,111 +564,29 @@ class Stack():
                 sigma=sigma)).real
 
 
-class dialStack(Stack):
-    """A special stack class for footage of the dial wheel on the microscope.
+class EyeStack(Stack):
+    """A special stack for handling a focus stack of fly eye images.
     """
-    def __init__(self, dirname, f_type, bw=True):
-        self.dirname = dirname
-        self.f_type = f_type
-        Stack.__init__(self, self.dirname, f_type=self.f_type)
+    def __init__(self, dirname, f_type=".jpg", bw=False):
+        Stack.__init__(self, dirname, f_type, bw)
+        self.eye = None
 
-    def getMotion(self):
-        """Measure the angle of rotation for the tick marks in this dial
-        stack.
+    def get_eye_stack(self, smooth=0, interpolate=True, use_all=False,
+                      layer_smooth=0, padding=1.2):
+        """Generate focus stack of images and then crop out the eye.
         """
-        self.getAverage()
-        self.startBlobDetector()
-        self.getCenter()
-        self.angles = []
-        self.layers[0].generateMask(b_ground = self.average)
-        previous = 255 - self.layers[0].mask
-        prev_kp = self.detector.detect(previous)
-        self.layers[0].keypoints = prev_kp
-        x = 1
-        whole = len(self.layers)
-        for l in self.layers[1:]:
-            l.generateMask(b_ground=self.average)
-            current = 255 - l.mask
-            l.image = None
-            curr_kp = self.detector.detect(current)
-            l.keypoints = curr_kp
-            self.angles += [self.angleRotated(prev_kp, curr_kp, self.center)]
-            prev_kp = curr_kp
-            printProgress(x, whole)
-            x += 1
-        self.angles = np.array(self.angles)
-        printProgress(x, whole)
-        #todo! consider how to get absolute angle rotation by tracking
-        #individual ticks throughout the video. Jamie says that this'll
-        #contribute less noise
-        # return self.angles
-
-    def getCenter(self, samples=5):
-        """Find the center of the ellipse based on a sampling of the dial
-        ticks
-        """
-        comb = []
-        if self.average is None:
-            self.getAverage()
-        if self.detector is None:
-            self.startBlobDetector()
-        intervals = len(self.layers)/samples
-        for l in self.layers[::intervals]:
-            l.generateMask(b_ground=self.average)
-            kp = self.detector.detect(l.mask)
-            comb += [k.pt for k in kp]
-        comb = np.array(comb)
-        comb = comb.T
-        self.center = ellipse_center(fitEllipse(comb[0], comb[1]))
-
-    def angleRotated(self, prev_kp, curr_kp, center=None):
-        """ Given two sets of points, grab the average angle change given
-        that they are due to one general rotation.
-        """
-        if center is None and self.center is not None:
-            if self.center is None:
-                self.getCenter()
-            center = self.center
-        prev_pos = np.array([k.pt for k in prev_kp])
-        curr_pos = np.array([k.pt for k in curr_kp])
-        tree = spatial.KDTree(prev_pos)
-        distance, index = tree.query(curr_pos, distance_upper_bound=3)
-        curr_pos = curr_pos[distance != np.inf]
-        index = index[distance != np.inf]
-        distance = distance[distance != np.inf]
-        prev_pos = prev_pos[index]
-        angle = insideAngle(prev_pos, curr_pos, center)
-        angle = np.mean(angle)
-        return angle
-
-    def startBlobDetector(
-            self, filterByArea=True, minArea=200, maxArea=1000,
-            filterByConvexity=True, minConvexity=.8,
-            filterByInertia=False, minInertiaRatio=.05,
-            maxInertiaRatio=.25, filterByCircularity=False,
-            maxThreshold=256, minThreshold=50):
-        """Set up the Blob detector with default params for detecting the
-        ticks from our first video.
-        """
-        self.params = cv2.SimpleBlobDetector_Params()
-        self.minThreshold = minThreshold
-        self.maxThreshold = maxThreshold
-        self.params.filterByArea = filterByArea
-        self.params.minArea = minArea
-        self.params.maxArea = maxArea
-        self.params.filterByConvexity = filterByConvexity
-        self.params.minConvexity = minConvexity
-        self.params.filterByInertia = filterByInertia
-        self.params.minInertiaRatio = minInertiaRatio
-        self.params.maxInertiaRatio = maxInertiaRatio
-        self.params.filterByCircularity = filterByCircularity
-        self.detector = cv2.SimpleBlobDetector_create(self.params)
+        self.focus_stack(smooth, interpolate, use_all, layer_smooth)
+        self.eye = Eye(self.stack.astype('uint8'))
+        self.eye.crop_eye(padding)
+        self.eye = Eye(self.eye.eye)
 
 
 class Video(Stack):
-    import bird_call as aud
     """Takes a stack of images and uses common functions to track motion or
     color."""
+
+    import bird_call as aud
+
     def __init__(self, filename, fps=30, f_type=".jpg"):
         self.vid_formats = [
             '.mov',
@@ -729,7 +639,7 @@ class Video(Stack):
         color_range = []
         intervals = len(self.layers)/samples
         for l in self.layers[::intervals]:
-            l.selectColor()
+            l.select_color()
             color_range += [l.cs.colors]
             l.image = None
         color_range = np.array(color_range)
@@ -770,7 +680,7 @@ class Video(Stack):
                 self.track += [(track[1], track[0])]
                 # l.image = None
                 progress += 1
-                printProgress(progress, len(self.layers))
+                print_progress(progress, len(self.layers))
         if display:
             plt.ion()
             first = True
@@ -790,7 +700,14 @@ class Video(Stack):
                     first = False
 
 
-class colorSelector():
+class ColorSelector():
+
+    """Provides a GUI for selecting color ranges based on a selected sample of
+    hues, saturation, and values. Makes a simple assumption about the
+    distribution of those colors, namely that the colors of interest lie within
+    2 standard deviations of the selection.
+    """
+
     def __init__(self, frame):
         from matplotlib import gridspec
         if isinstance(frame, str):
@@ -845,7 +762,7 @@ class colorSelector():
         self.valspan = self.vals.axvspan(
             self.colors[0][2], self.colors[1][2], color="green", alpha=.3)
 
-    def selectColor(self, dilate=5):
+    def select_color(self, dilate=5):
         hsv = colors.rgb_to_hsv(self.frame.copy())
         low_hue = self.colors[:, 0].min()
         hi_hue = self.colors[:, 0].max()
@@ -888,7 +805,7 @@ class colorSelector():
             m = np.append(h_mean, m)
             sd = np.append(h_std, sd)
             self.colors = np.array([m-2*sd, m+2*sd])
-            self.keyed = self.selectColor()
+            self.keyed = self.select_color()
             self.img.set_array(self.keyed)
             self.hue_dist = list(np.histogram(
                 self.hsv[:, :, 0], 255,
@@ -932,7 +849,7 @@ class colorSelector():
             [x2, 0.],
             [x1, 0.]])
 
-    def setRadSpan(self, a1, a2, R=1, n=100):
+    def set_radius_span(self, a1, a2, R=1, n=100):
         vals = np.linspace(a1, a2, n)
         vals.sort()
         res = np.zeros(n*2+3)
@@ -945,7 +862,7 @@ class colorSelector():
     def displaying(self):
         return plt.fignum_exists(self.fig.number)
 
-    def startUp(self):
+    def start_up(self):
         from matplotlib.widgets import RectangleSelector
 
         self.RS = RectangleSelector(
