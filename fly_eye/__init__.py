@@ -11,7 +11,7 @@ from matplotlib import mlab
 from skimage.draw import ellipse as Ellipse
 
 from numpy.linalg import eig, inv, norm
-from scipy import spatial, ndimage, stats
+from scipy import spatial, ndimage, stats, signal
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.measurements import center_of_mass
 
@@ -372,7 +372,7 @@ class Eye(Layer):
         eye_ffts = np.fft.fft2(sections)
         print("done")
 
-        gauss = stats.norm.pdf(np.arange(window_length), window_length/2,
+        gauss = stats.norm.pdf(np.arange(window_length), window_length/2.,
                                .2*window_length)
         gauss = np.repeat(gauss, window_length).reshape((
             window_length, window_length))
@@ -578,7 +578,26 @@ class EyeStack(Stack):
         self.focus_stack(smooth, interpolate, use_all, layer_smooth)
         self.eye = Eye(self.stack.astype('uint8'))
         self.eye.crop_eye(padding)
+        self.heights = self.heights[min(self.eye.cc):max(self.eye.cc),
+                                    min(self.eye.rr):max(self.eye.rr)]
         self.eye = Eye(self.eye.eye)
+
+    def get_3d_data(self, width_calibration=1, height_calibration=1,
+                    averaging_range=5):
+        if self.stack is None:
+            self.get_eye_stack()
+        self.eye.get_ommatidia()
+        xs = self.eye.ommatidia[0]
+        ys = self.eye.ommatidia[1]
+        hs = []
+        for x, y in zip(xs, ys):
+            hs += [self.heights[y-averaging_range:y+averaging_range,
+                                x-averaging_range:x+averaging_range].mean()]
+        hs = np.array(hs)
+        xs = width_calibration*xs
+        ys = width_calibration*ys
+        hs = height_calibration*hs
+        self.ommatidia_3d = np.array([xs, ys, hs], float)
 
 
 class Video(Stack):
