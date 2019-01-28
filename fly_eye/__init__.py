@@ -1,9 +1,11 @@
 import os
 import PIL
-from Queue import Queue
+from queue import Queue
 import numpy as np
 import subprocess
 import seaborn as sbn
+
+"""test"""
 
 from matplotlib import colors
 from matplotlib import pyplot as plt
@@ -428,7 +430,7 @@ class Stack():
     """ A class for combining multiple images into one by taking those
     with the highest focus value determined by the sobel operator.
     """
-    def __init__(self, dirname="./", f_type=".jpg", bw=False):
+    def __init__(self, dirname="./", f_type=".jpg", bw=False, eye=True):
         self.dirname = dirname
         fns = os.listdir(self.dirname)
         fns = [os.path.join(dirname, f) for f in fns]
@@ -437,9 +439,14 @@ class Stack():
         fns = [f for f in fns if f.endswith(f_type)]
         fns = [f for f in fns if os.path.split(f)[-1].startswith(".") is False]
         self.layers = []
+        self.eyes = eye
         for f in fns:
-            layer = Layer(f, bw)
-            self.layers.append(layer)
+            if self.eyes:
+                layer = Eye(f, bw)
+                self.layers.append(layer)
+            else:
+                layer = Layer(f, bw)
+                self.layers.append(layer)
             # layer.load_image()
             # if layer.image is not None:
             #     self.layers += [layer]
@@ -461,7 +468,7 @@ class Stack():
         first = self.layers[0].load_image()
         res = np.zeros(first.shape, dtype=float)
         intervals = len(self.layers)/samples
-        for l in self.layers[::intervals]:
+        for l in self.layers[::int(intervals)]:
             img = l.load_image().astype(float)
             res += img
             l.image = None
@@ -553,7 +560,7 @@ class Stack():
                         self.smooth(smooth)
                 else:
                     self.stack = self.images[1]
-            print "done"
+            print("done")
 
     def smooth(self, sigma):
         """A 2d smoothing filter for the heights array"""
@@ -601,8 +608,8 @@ class EyeStack(Stack):
 
 
 class Video(Stack):
-    """Takes a stack of images and uses common functions to track motion or
-    color."""
+    """Takes a stack of images, or a video that is converted to a stack of images,
+    and uses common functions to track motion or color."""
 
     import bird_call as aud
 
@@ -610,10 +617,12 @@ class Video(Stack):
         self.vid_formats = [
             '.mov',
             '.mp4',
+            '.mpg',
             '.avi']
         self.filename = filename
         self.f_type = f_type
         self.track = None
+        self.colors = None
         if ((os.path.isfile(self.filename) and
              self.filename.lower()[-4:] in self.vid_formats)):
             # if file is a video, use ffmpeg to generate a jpeg stack
@@ -630,12 +639,11 @@ class Video(Stack):
             try:
                 failed = subprocess.check_output(
                     ["ffmpeg", "-i", self.filename,
-                     "-vf", "scale=360:-1",
+                     "-vf", "scale=720:-1",
                      "./{}/frame%05d{}".format(self.dirname, self.f_type)])
             except subprocess.CalledProcessError:
                 print("failed to parse video into {}\
                 stack!".format(self.f_type))
-                return False
             try:
                 audio_fname = "{}.wav".format(self.filename[:-4])
                 failed = subprocess.check_output(
@@ -646,13 +654,11 @@ class Video(Stack):
                 self.audio = self.aud.Recording(audio_fname, trim=False)
             except subprocess.CalledProcessError:
                 print("failed to get audio from video!")
-                return False
 
         elif os.path.isdir(self.filename):
             self.dirname = self.filename
             self.fps = fps
         Stack.__init__(self, self.dirname, f_type=self.f_type)
-        self.colors = None
 
     def select_color_range(self, samples=5):
         color_range = []
@@ -664,6 +670,39 @@ class Video(Stack):
         color_range = np.array(color_range)
         self.colors = np.array([color_range.min((0, 1)),
                                 color_range.max((0, 1))])
+
+    def track_foreground(self, diff_threshold=None, frames_avg=50,
+                         smooth_std=3):
+        """Simple motion tracking using an average of the whole video as the
+        background and the absolut difference between each frame and the
+        background as the foreground.
+        """
+        avg = self.get_average(frames_avg)
+        self.track = []
+        self.diffs = []
+        for ind, layer in enumerate(self.layers):
+            diff = abs(layer.load_image() - avg)
+            diff = colors.rgb_to_hsv(diff)[..., 2]
+            layer.image = None
+            diff = gaussian_filter(diff, smooth_std)
+            layer.diff = diff
+            if diff_threshold is None:
+                xs, ys = local_maxima(diff, disp=False, p=95)
+                if len(xs) > 0:
+                    self.track += [(xs[0], ys[0])]
+                else:
+                    self.track += [(np.nan, np.nan)]
+            else:
+                xs, ys = local_maxima(diff, disp=False,
+                                      min_diff=diff_threshold)
+                if len(xs) > 0:
+                    self.track += [(xs, ys)]
+                else:
+                    self.track += [(np.nan, np.nan)]
+            # self.diffs += [diff]
+            # self.track += [(np.argmax(diff.mean(0)),
+            #                 np.argmax(diff.mean(1)))]
+            print_progress(ind, len(self.layers))
 
     def color_key(self, samples=5, display=True):
         """Grab unmoving 'background' of the stack by averaging over
