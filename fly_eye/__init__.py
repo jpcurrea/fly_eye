@@ -5,8 +5,6 @@ import numpy as np
 import subprocess
 import seaborn as sbn
 
-"""test"""
-
 from matplotlib import colors
 from matplotlib import pyplot as plt
 from matplotlib import mlab
