@@ -1,6 +1,5 @@
 import os
 import PIL
-from queue import Queue
 import numpy as np
 import subprocess
 import seaborn as sbn
@@ -9,6 +8,7 @@ from matplotlib import colors
 from matplotlib import pyplot as plt
 from matplotlib import mlab
 from skimage.draw import ellipse as Ellipse
+import skimage
 
 from numpy.linalg import eig, inv, norm
 from scipy import spatial, ndimage, stats, signal
@@ -21,6 +21,8 @@ from rolling_window import rolling_window
 def rgb_2_gray(rgb):
     return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
 
+def gaussian(x, mu, sig):
+    return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
 
 def print_progress(part, whole):
     import sys
@@ -28,7 +30,6 @@ def print_progress(part, whole):
     sys.stdout.write('\r')
     sys.stdout.write("[%-20s] %d%%" % ("="*int(20*prop), 100*prop))
     sys.stdout.flush()
-
 
 def interpolate_max(arr, heights=(0.,1.,2.)):
     """Given 3 points or arrays, and their corresponding height
@@ -69,6 +70,48 @@ def interpolate_max(arr, heights=(0.,1.,2.)):
     max_heights[i] = np.argmax(arr, axis=0)[i]
     return max_heights
 
+def cartesian_to_spherical(xs, ys, zs, center=[0, 0, 0]):
+    pts = np.array([xs, ys, zs])
+    center = np.array(center)
+    pts -= np.repeat(center, pts.shape[1]).reshape(pts.shape)
+    xs, ys, zs = pts
+    radial_dists = LA.norm(pts, axis=0)
+    inclination = np.arccos(zs / radial_dists)
+    azimuth = np.arctan2(ys, xs)
+    return inclination, azimuth, radial_dists
+
+def spherical_to_cartesian(inclination, azimuth, radial_dists, center=[0,0,0]):
+    pts = np.array([inclination, azimuth, radial_dists])
+    cx, cy, cz = center
+    xs = radial_dists * np.sin(inclination) * np.cos(azimuth)
+    ys = radial_dists * np.sin(inclination) * np.sin(azimuth)
+    zs = radial_dists * np.cos(inclination)
+    xs += cx
+    ys += cy
+    zs += cz
+    return xs, ys, zs
+
+def rotate(arr, theta, axis=0):
+    if axis == 0:
+        rot_matrix = np.array(
+            [[1, 0, 0],
+             [0, np.cos(theta), -np.sin(theta)],
+             [0, np.sin(theta), np.cos(theta)]])
+    elif axis == 1:
+        rot_matrix = np.array(
+            [[np.cos(theta), 0, np.sin(theta)],
+             [0, 1, 0],
+             [-np.sin(theta), 0, np.cos(theta)]])
+    elif axis == 2:
+        rot_matrix = np.array(
+            [[np.cos(theta), -np.sin(theta), 0],
+             [np.sin(theta), np.cos(theta), 0],
+             [0, 0, 1]])
+    nx, ny, nz = np.dot(arr, rot_matrix).T
+    nx = np.squeeze(nx)
+    ny = np.squeeze(ny)
+    nz = np.squeeze(nz)
+    return np.array([nx, ny, nz])
 
 def inside_angle(A, B, C):
     CA = A - C
@@ -134,9 +177,9 @@ def local_maxima(img, p=5, window=10, min_diff=None,
     x, y = [], []
     for dy, dx in slices:
         x_center = (dx.start + dx.stop - 1)/2
-        x.append(x_center)
+        x.append(int(x_center))
         y_center = (dy.start + dy.stop - 1)/2
-        y.append(y_center)
+        y.append(int(y_center))
 
     vals = img[y, x]
     ind = np.argsort(vals)
@@ -153,7 +196,7 @@ def fundamental_maxima(img, disp=True, p=5, window=5):
     # fft = np.fft.fft2(img)
     # fshift = np.fft.fftshift(fft)
     fshift = np.copy(img)
-    fshift[:, :w/2] = 0
+    fshift[:, :int(np.round(w/2))] = 0
     # fshift[l/2, w/2] = 0
     # if disp:
     #     subplot(131)
@@ -184,7 +227,7 @@ def fundamental_maxima(img, disp=True, p=5, window=5):
         inds = points[index].T
         key_freqs = fshift[inds[1], inds[0]]
         new_fshift = np.zeros(fshift.shape, dtype=complex)
-        new_fshift[inds[1], inds[0]] = key_freqs/abs(key_freqs)
+        new_fshift[inds[1], inds[0]] = key_freqs  # /abs(key_freqs)
         new_fft = np.fft.ifftshift(new_fshift)
         new_img = np.fft.ifft2(new_fft).real
         if disp:
@@ -270,7 +313,7 @@ class Layer():
     def select_color(self, range=None):
         if self.image is None:
             self.load_image()
-        self.cs = ColorSelector(self.image)
+        self.cs = ColorSelector(self.image, bw=self.bw)
         self.cs.start_up()
         while self.cs.displaying():
             pass
@@ -305,16 +348,17 @@ class Eye(Layer):
     could be modified for other eyes (square lattice, for instance)
     """
 
-    def __init__(self, filename, bw=False):
+    def __init__(self, filename, bw=False, pixel_size=1):
         Layer.__init__(self, filename, bw)
         self.eye_contour = None
         self.ellipse = None
         self.ommatidia = None
+        self.pixel_size = pixel_size
 
     def get_eye_outline(self):
         self.select_color()
         if self.cs.mask is not None:
-            im, conts, h = cv2.findContours(
+            conts, h = cv2.findContours(
                 self.cs.mask,
                 cv2.RETR_TREE,
                 cv2.CHAIN_APPROX_NONE)
@@ -328,13 +372,13 @@ class Eye(Layer):
             vert2 = np.cumsum(mask[::-1], axis=0)[::-1]
             self.eye_mask = (vert1 * vert2) > 0
 
-    def get_eye_sizes(self, disp=True):
+    def get_eye_sizes(self, disp=False):
         if self.eye_contour is None:
             self.get_eye_outline()
         self.ellipse = cv2.fitEllipse(self.eye_contour)
-        self.eye_length = max(self.ellipse[1])
-        self.eye_width = min(self.ellipse[1])
-        self.eye_area = cv2.contourArea(self.eye_contour)
+        self.eye_length = self.pixel_size*max(self.ellipse[1])
+        self.eye_width = self.pixel_size*min(self.ellipse[1])
+        self.eye_area = self.pixel_size**2*cv2.contourArea(self.eye_contour)
         if disp:
             plt.imshow(self.image)
             plt.plot(self.eye_contour[:, 0], self.eye_contour[:, 1])
@@ -359,49 +403,68 @@ class Eye(Layer):
         self.eye = out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
         return self.eye
 
-    def get_ommatidia(self, overlap=5, window_length=100):
-        eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, 2]
+    def get_ommatidia(self, overlap=5, window_length=100, sigma=3):
+        if self.image is None:
+            self.load_image()
+        eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, 1]
         if self.eye_contour is None:
             self.get_eye_sizes(disp=False)
         eye_sats[self.eye_mask == False] = eye_sats[self.eye_mask].mean()
 
-        sections = rolling_window(eye_sats, (window_length, window_length))
-        sections = sections[::overlap, ::overlap]
+        eye_fft = np.fft.fft2(eye_sats)
+        eye_fft_shifted = np.fft.fftshift(eye_fft)
 
-        print("computing fourier transforms of windows")
-        eye_ffts = np.fft.fft2(sections)
-        print("done")
+        xinds, yinds = np.meshgrid(range(eye_fft.shape[1]), range(eye_fft.shape[0]))
+        ycenter, xcenter = np.array(eye_fft.shape)/2
 
-        gauss = stats.norm.pdf(np.arange(window_length), window_length/2.,
-                               .2*window_length)
-        gauss = np.repeat(gauss, window_length).reshape((
-            window_length, window_length))
-        gauss = gauss * gauss.T
-        gauss /= gauss.max()
-        gauss = (np.round(100*gauss, 0)).astype(int)
+        xdiffs, ydiffs = xinds - xcenter, yinds - ycenter
+        dists_2d = np.sqrt(xdiffs**2 + ydiffs**2)
 
-        print("finding fundamental gratings of each window")
-        centers = np.zeros(eye_sats.shape, dtype=int)
-        for row in range(sections.shape[0]):
-            for col in range(sections.shape[1]):
-                x, y = fundamental_maxima(
-                    np.fft.fftshift(eye_ffts[row, col]),
-                    disp=False)
-                x = np.array(x)
-                y = np.array(y)
-                if len(x) > 0:
-                    section_centers = np.zeros((window_length, window_length),
-                                               int)
-                    section_centers[y, x] = gauss[y, x]
-                    centers[row * overlap: row * overlap + window_length,
-                            col * overlap: col * overlap + window_length] += section_centers
-            print_progress(row, sections.shape[0])
-        self.centers = np.zeros(centers.shape, int)
-        self.centers[self.eye_mask] = ndimage.filters.gaussian_filter(
-            centers, sigma=3)[self.eye_mask]
-        self.ommatidia = np.array(local_maxima(self.centers, disp=False))
+        # measure 2d power spectrum as a function of radial distance from center
+        # using rolling maxima function to find the bounds of the fundamental spatial frequency
+        peaks = []
+        window_size = 5
+        for dist in np.arange(int(dists_2d.max()) - window_size):
+            i = np.logical_and(
+                dists_2d.flatten() >= dist, dists_2d.flatten() < dist + window_size)
+            peaks += [abs(eye_fft_shifted.flatten()[i]).max()]
+        
+        # use peaks to find the local maxima and minima
+        peaks = np.array(peaks)
+        optimum = np.squeeze(
+            skimage.feature.peak_local_max(peaks, num_peaks=2)[-1])  # second highest maximum
+        minima = peak_local_max(peaks.max() - peaks, min_distance=10)
+        minima -= optimum       # distance from optimum
+        
+        lower_bound = max(minima[minima < 0])  # greatest minimum below the optimum
+        lower_bound += optimum
+        upper_bound = min(minima[minima > 0])  # lowest minimum above the optimum
+        upper_bound += optimum
+        
+        std = (upper_bound - lower_bound)/4  # 
+        weights = gaussian(dists_2d, optimum, std)
 
-    def get_ommatidial_diameter(self, disp=True, k_neighbors=7, radius=100):
+        # using the gaussian weights, invert back to the filtered image
+        selection_shifted = np.zeros(eye_fft.shape, dtype=complex)
+        selection_shifted = eye_fft_shifted*weights
+        selection_fft = np.fft.ifftshift(selection_shifted)
+        selection = np.fft.ifft2(selection_fft)
+
+        self.filtered_eye = selection.real
+        self.centers = np.zeros(selection.shape)
+        self.centers[self.eye_mask] = self.filtered_eye[self.eye_mask]
+
+        # filtered_eye = selection.real
+        # centers = np.zeros(selection.shape)
+        # centers[eye.eye_mask] = filtered_eye[eye.eye_mask]
+
+        ys, xs = peak_local_max(self.filtered_eye, min_distance=5).T
+        in_eye = self.eye_mask[ys, xs]
+        ys, xs = ys[in_eye], xs[in_eye]
+
+        self.ommatidia = np.array([self.pixel_size*xs, self.pixel_size*ys])
+
+    def get_ommatidial_diameter(self, k_neighbors=7, radius=100):
         if self.ommatidia is None:
             self.get_ommatidia()
         self.tree = spatial.KDTree(self.ommatidia.T)
@@ -419,6 +482,7 @@ class Eye(Layer):
         self.ommatidial_dists = np.nanmean(dists, axis=1)
 
         (x, y), (w, h), ang = self.ellipse
+        x, y, radius = self.pixel_size * x, self.pixel_size * y, self.pixel_size * radius
         near_center = self.tree.query_ball_point([x, y], r=radius)
 
         self.ommatidial_diameter = self.ommatidial_dists[near_center].mean()
@@ -445,17 +509,7 @@ class Stack():
             else:
                 layer = Layer(f, bw)
                 self.layers.append(layer)
-            # layer.load_image()
-            # if layer.image is not None:
-            #     self.layers += [layer]
-            #     if len(self.layers) > 1000:
-            #         layer.image = None
-            # else:
-            #     fns.remove(f)
-            #     print("File {} is not appropriate format for import".format(f))
 
-        self.images = Queue(maxsize=len(self.layers))
-        self.focuses = Queue(maxsize=len(self.layers))
         self.stack = None
         self.bw = bw
 
@@ -572,9 +626,11 @@ class Stack():
 class EyeStack(Stack):
     """A special stack for handling a focus stack of fly eye images.
     """
-    def __init__(self, dirname, f_type=".jpg", bw=False):
+    def __init__(self, dirname, f_type=".jpg", bw=False, pixel_size=1, depth_size=1):
         Stack.__init__(self, dirname, f_type, bw)
         self.eye = None
+        self.pixel_size = pixel_size
+        self.depth_size = depth_size
 
     def get_eye_stack(self, smooth=0, interpolate=True, use_all=False,
                       layer_smooth=0, padding=1.2):
@@ -585,31 +641,109 @@ class EyeStack(Stack):
         self.eye.crop_eye(padding)
         self.heights = self.heights[min(self.eye.cc):max(self.eye.cc),
                                     min(self.eye.rr):max(self.eye.rr)]
-        self.eye = Eye(self.eye.eye)
+        self.stack = self.stack[min(self.eye.cc):max(self.eye.cc),
+                                min(self.eye.rr):max(self.eye.rr)]
+        self.mask = self.eye.cs.mask[min(self.eye.cc):max(self.eye.cc),
+                                 min(self.eye.rr):max(self.eye.rr)]
+        # self.eye = Eye(self.eye.eye)
 
-    def get_3d_data(self, width_calibration=1, height_calibration=1,
-                    averaging_range=5):
+    def get_3d_data(self, averaging_range=5):
         if self.stack is None:
             self.get_eye_stack()
-        self.eye.get_ommatidia()
-        xs = self.eye.ommatidia[0]
-        ys = self.eye.ommatidia[1]
-        hs = []
-        for x, y in zip(xs, ys):
-            hs += [self.heights[y-averaging_range:y+averaging_range,
-                                x-averaging_range:x+averaging_range].mean()]
-        hs = np.array(hs)
-        xs = width_calibration*xs
-        ys = width_calibration*ys
-        hs = height_calibration*hs
-        self.ommatidia_3d = np.array([xs, ys, hs], float)
+        height, width = self.heights.shape
+        xvals = np.linspace(0, (width - 1), width)
+        yvals = np.linspace(0, (height - 1), height)
+        xs, ys = np.meshgrid(xvals, yvals)
+
+        self.eye_3d = np.array(
+            [xs, ys, self.heights])
+        
+        self.eye_3d = np.array(
+            [self.pixel_size * xs[self.mask == 1].flatten(),
+             self.pixel_size * ys[self.mask == 1].flatten(),
+             self.depth_size * self.heights[self.mask == 1].flatten()])
+
+        # store the indexes associated with the 3d data
+        self.eye_3d_inds = np.array(
+            [xs[self.mask == 1].flatten(),
+             ys[self.mask == 1].flatten(),
+             self.heights[self.mask == 1].flatten()])
+
+        # store the rgb color channels associated with the 3d data
+        r, g, b = self.stack.transpose((2, 0, 1))
+        self.eye_3d_colors = np.array(
+            [r[self.mask == 1].flatten(),
+             g[self.mask == 1].flatten(),
+             b[self.mask == 1].flatten()])
+
+        xs, ys, zs = self.eye_3d
+        self.radius, self.center = sphereFit(xs, ys, zs)
+        self.eye_3d -= np.repeat(
+            self.center, self.eye_3d.shape[1]).reshape(self.eye_3d.shape)
+
+        # rotate points until center of mass is only on the x axis
+        # this centers the eye in polar coordinates, minimizing distortion due to the projection
+        # 1. find center of mass
+        com = self.eye_3d.mean(1)
+        # 2. rotate com along x (com[0]) axis until z (com[2]) = 0
+        ang1 = np.arctan2(com[2], com[1])
+        com1 = rotate(com, ang1, axis=0)
+        rot1 = rotate(self.eye_3d.T, ang1, axis=0)
+        # 3. rotate com along z (com[2]) axis until y (com[1])= 0
+        ang2 = np.arctan2(com1[1], com1[0])
+        com2 = rotate(com1, ang2, axis=2)
+        rot2 = rotate(rot1.T, ang2, axis=2)
+        # 4. convert to spherical coordinates now that they are centered
+        xs, ys, zs = rot2
+        self.inclination, self.azimuth, self.radii = cartesian_to_spherical(xs, ys, zs)
+        self.polar = np.array([self.inclination, self.azimuth, self.radii])
+
+        # using polar coordinates, 'flatten' the image of the eye
+        # 1. create a grid for sampling the polar data
+        # use a resultion that is high enough for the smallest range
+        # resolution of the original image
+        incl_range = self.inclination.max() - self.inclination.min()
+        azim_range = self.azimuth.max() - self.azimuth.min()
+        resolution = min(incl_range, azim_range) / np.sqrt(width**2 + height**2)
+        self.polar_grid_resolution = resolution
+        incl_new = np.linspace(
+            self.inclination.min(),
+            self.inclination.max(),
+            incl_range / resolution)
+        azim_new = np.linspace(
+            self.azimuth.min(),
+            self.azimuth.max(),
+            azim_range / resolution)
+        incl_new, azim_new = np.meshgrid(incl_new, azim_new)
+        # 2. sample data and interpolate into a grid image
+        pred = np.array([self.inclination, self.azimuth])
+        r_grid = interpolate.griddata(
+            pred.T, self.eye_3d_colors[0], (incl_new, azim_new), method='nearest')
+        g_grid = interpolate.griddata(
+            pred.T, self.eye_3d_colors[1], (incl_new, azim_new), method='nearest')
+        b_grid = interpolate.griddata(
+            pred.T, self.eye_3d_colors[2], (incl_new, azim_new), method='nearest')
+        self.flat_eye = np.array([r_grid, g_grid, b_grid]).transpose((1, 2, 0))
+        self.flat_eye = Eye(self.flat_eye, pixel_size=self.polar_grid_resolution)
+
+        # in polar coordinates, distances correspond to angles in cartesian space
+        self.flat_eye.get_ommatidial_diameter()  
+        # interommatidial_ange in degrees
+        self.interommatidial_angle = self.flat_eye.ommatidial_diameter * 180. / np.pi
+        # ommatidial diameter in mm
+        self.ommatidial_diameter = 2 * self.radius * np.sin(self.flat_eye.ommatidial_diameter)
+
+        # vertical field of view using the major axis of the flat eye, in degrees
+        self.fov_vertical = self.flat_eye.eye_length * 180. / np.pi
+        # horizontal field of view using the minor axis of the flat eye, in degrees
+        self.fov_horizontal = self.flat_eye.eye_width * 180. / np.pi
+        # field of view approximating the area as an ellipse, in steradians
+        self.fov = np.pi * (self.flat_eye.eye_width / 2) * (self.flat_eye.eye_length / 2)
 
 
 class Video(Stack):
     """Takes a stack of images, or a video that is converted to a stack of images,
     and uses common functions to track motion or color."""
-
-    import bird_call as aud
 
     def __init__(self, filename, fps=30, f_type=".jpg"):
         self.vid_formats = [
@@ -764,8 +898,9 @@ class ColorSelector():
     2 standard deviations of the selection.
     """
 
-    def __init__(self, frame):
+    def __init__(self, frame, bw=False):
         from matplotlib import gridspec
+        self.bw = bw
         if isinstance(frame, str):
             frame = ndimage.imread(frame)
         self.frame = frame
@@ -775,10 +910,10 @@ class ColorSelector():
 
         self.pic = self.fig.add_subplot(gs[:3, 1:])
         plt.title("Original")
-        plt.imshow(self.frame)
+        plt.imshow(self.frame.astype('uint8'))
         self.key = self.fig.add_subplot(gs[3:, 1:])
         plt.title("Color Keyed")
-        self.img = self.key.imshow(self.frame)
+        self.img = self.key.imshow(self.frame.astype('uint8'))
         self.hues = self.fig.add_subplot(gs[0:2, 0], polar=True)
         plt.title("Hues")
         self.sats = self.fig.add_subplot(gs[2:4, 0])
@@ -836,7 +971,10 @@ class ColorSelector():
         vals = np.logical_and(
             hsv[:, :, 2] > self.colors[:, 2].min(),
             hsv[:, :, 2] < self.colors[:, 2].max())
-        self.mask = np.logical_and(hues, sats, vals)
+        if self.bw:
+            self.mask = vals
+        else:
+            self.mask = np.logical_and(hues, sats, vals)
         # cv2.inRange(hsv, np.array(colors[0]), np.array(colors[1]))
         # mask = cv2.erode(mask, None, iterations=2)
         self.mask = ndimage.morphology.binary_dilation(
@@ -862,7 +1000,7 @@ class ColorSelector():
             sd = np.append(h_std, sd)
             self.colors = np.array([m-2*sd, m+2*sd])
             self.keyed = self.select_color()
-            self.img.set_array(self.keyed)
+            self.img.set_array(self.keyed.astype('uint8'))
             self.hue_dist = list(np.histogram(
                 self.hsv[:, :, 0], 255,
                 range=(0, 1), density=True))
