@@ -91,6 +91,21 @@ def spherical_to_cartesian(inclination, azimuth, radial_dists, center=[0,0,0]):
     zs += cz
     return xs, ys, zs
 
+def sphereFit(spX, spY, spZ):
+    #   Assemble the f matrix
+    f = np.zeros((len(spX), 1))
+    f[:, 0] = (spX**2) + (spY**2) + (spZ**2)
+    A = np.zeros((len(spX), 4))
+    A[:, 0] = spX*2
+    A[:, 1] = spY*2
+    A[:, 2] = spZ*2
+    A[:, 3] = 1
+    C, residules, rank, sigval = np.linalg.lstsq(A, f, rcond=None)
+    #   solve for the radius
+    t = (C[0]*C[0])+(C[1]*C[1])+(C[2]*C[2])+C[3]
+    radius = math.sqrt(t)
+    return radius, np.squeeze(C[:-1])
+
 def rotate(arr, theta, axis=0):
     if axis == 0:
         rot_matrix = np.array(
