@@ -449,7 +449,7 @@ class Eye(Layer):
         # use peaks to find the local maxima and minima
         peaks = np.array(peaks)
         optimum = np.squeeze(
-            peak_local_max(peaks, num_peaks=2)[-1])  # second highest maximum
+            peak_local_max(peaks, num_peaks=2, min_distance=10)[-1])  # second highest maximum
         minima = peak_local_max(peaks.max() - peaks, min_distance=10)
         minima -= optimum       # distance from optimum
         
