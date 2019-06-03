@@ -1,5 +1,6 @@
 import os
 import PIL
+import math
 import numpy as np
 import subprocess
 import seaborn as sbn
@@ -7,11 +8,12 @@ import seaborn as sbn
 from matplotlib import colors
 from matplotlib import pyplot as plt
 from matplotlib import mlab
-from skimage.draw import ellipse as Ellipse
 import skimage
+from skimage.draw import ellipse as Ellipse
+from skimage.feature import peak_local_max
 
 from numpy.linalg import eig, inv, norm
-from scipy import spatial, ndimage, stats, signal
+from scipy import spatial, ndimage, stats, signal, interpolate
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.measurements import center_of_mass
 
@@ -75,7 +77,7 @@ def cartesian_to_spherical(xs, ys, zs, center=[0, 0, 0]):
     center = np.array(center)
     pts -= np.repeat(center, pts.shape[1]).reshape(pts.shape)
     xs, ys, zs = pts
-    radial_dists = LA.norm(pts, axis=0)
+    radial_dists = norm(pts, axis=0)
     inclination = np.arccos(zs / radial_dists)
     azimuth = np.arctan2(ys, xs)
     return inclination, azimuth, radial_dists
@@ -447,7 +449,7 @@ class Eye(Layer):
         # use peaks to find the local maxima and minima
         peaks = np.array(peaks)
         optimum = np.squeeze(
-            skimage.feature.peak_local_max(peaks, num_peaks=2)[-1])  # second highest maximum
+            peak_local_max(peaks, num_peaks=2)[-1])  # second highest maximum
         minima = peak_local_max(peaks.max() - peaks, min_distance=10)
         minima -= optimum       # distance from optimum
         
@@ -648,7 +650,7 @@ class EyeStack(Stack):
         self.depth_size = depth_size
 
     def get_eye_stack(self, smooth=0, interpolate=True, use_all=False,
-                      layer_smooth=0, padding=1.2):
+                      layer_smooth=0, padding=.5):
         """Generate focus stack of images and then crop out the eye.
         """
         self.focus_stack(smooth, interpolate, use_all, layer_smooth)
@@ -660,6 +662,8 @@ class EyeStack(Stack):
                                 min(self.eye.rr):max(self.eye.rr)]
         self.mask = self.eye.cs.mask[min(self.eye.cc):max(self.eye.cc),
                                  min(self.eye.rr):max(self.eye.rr)]
+        self.eye.eye_contour[:, 0] -= min(self.eye.rr)
+        self.eye.eye_contour[:, 1] -= min(self.eye.cc)
         # self.eye = Eye(self.eye.eye)
 
     def get_3d_data(self, averaging_range=5):
@@ -671,47 +675,50 @@ class EyeStack(Stack):
         xs, ys = np.meshgrid(xvals, yvals)
 
         self.eye_3d = np.array(
-            [xs, ys, self.heights])
-        
-        self.eye_3d = np.array(
+            [xs.flatten(), ys.flatten(), self.heights.flatten()])
+
+        self.eye_3d_masked = np.array(
             [self.pixel_size * xs[self.mask == 1].flatten(),
              self.pixel_size * ys[self.mask == 1].flatten(),
              self.depth_size * self.heights[self.mask == 1].flatten()])
 
-        # store the indexes associated with the 3d data
-        self.eye_3d_inds = np.array(
-            [xs[self.mask == 1].flatten(),
-             ys[self.mask == 1].flatten(),
-             self.heights[self.mask == 1].flatten()])
-
         # store the rgb color channels associated with the 3d data
         r, g, b = self.stack.transpose((2, 0, 1))
         self.eye_3d_colors = np.array(
-            [r[self.mask == 1].flatten(),
-             g[self.mask == 1].flatten(),
-             b[self.mask == 1].flatten()])
+            [r.flatten(), g.flatten(), b.flatten()])
 
-        xs, ys, zs = self.eye_3d
+        xs, ys, zs = self.eye_3d_masked
         self.radius, self.center = sphereFit(xs, ys, zs)
         self.eye_3d -= np.repeat(
             self.center, self.eye_3d.shape[1]).reshape(self.eye_3d.shape)
 
         # rotate points until center of mass is only on the x axis
         # this centers the eye in polar coordinates, minimizing distortion due to the projection
+        # also, rotate the eye contour by the same rotation
         # 1. find center of mass
         com = self.eye_3d.mean(1)
+        # xs, ys = self.eye.eye_contour.T
+        # zs = self.heights[xs, ys].
+        # outline = np.array([self.pixel_size * xs.flatten(),
+        #                     self.pixel_size * ys.flatten(),
+        #                     self.depth_size * zs.flatten()])
         # 2. rotate com along x (com[0]) axis until z (com[2]) = 0
         ang1 = np.arctan2(com[2], com[1])
         com1 = rotate(com, ang1, axis=0)
         rot1 = rotate(self.eye_3d.T, ang1, axis=0)
+        # outline1 = rotate(outline.T, ang1, axis=0)
         # 3. rotate com along z (com[2]) axis until y (com[1])= 0
         ang2 = np.arctan2(com1[1], com1[0])
         com2 = rotate(com1, ang2, axis=2)
         rot2 = rotate(rot1.T, ang2, axis=2)
+        # outline2 = rotate(outline1.T, ang2, axis=0)
         # 4. convert to spherical coordinates now that they are centered
         xs, ys, zs = rot2
         self.inclination, self.azimuth, self.radii = cartesian_to_spherical(xs, ys, zs)
         self.polar = np.array([self.inclination, self.azimuth, self.radii])
+        # outline_inclination, outline_azimuth, outline_radii = cartesian_to_spherical(
+        #     outline2[0], outline[1], outline[2])
+        # self.polar_eye_outline = np.array([outline_inclination, outline_azimuth, outline_radii])
 
         # using polar coordinates, 'flatten' the image of the eye
         # 1. create a grid for sampling the polar data
@@ -733,13 +740,14 @@ class EyeStack(Stack):
         # 2. sample data and interpolate into a grid image
         pred = np.array([self.inclination, self.azimuth])
         r_grid = interpolate.griddata(
-            pred.T, self.eye_3d_colors[0], (incl_new, azim_new), method='nearest')
+            pred.T, self.eye_3d_colors[0], (incl_new, azim_new), method='linear')
         g_grid = interpolate.griddata(
-            pred.T, self.eye_3d_colors[1], (incl_new, azim_new), method='nearest')
+            pred.T, self.eye_3d_colors[1], (incl_new, azim_new), method='linear')
         b_grid = interpolate.griddata(
-            pred.T, self.eye_3d_colors[2], (incl_new, azim_new), method='nearest')
+            pred.T, self.eye_3d_colors[2], (incl_new, azim_new), method='linear')
         self.flat_eye = np.array([r_grid, g_grid, b_grid]).transpose((1, 2, 0))
         self.flat_eye = Eye(self.flat_eye, pixel_size=self.polar_grid_resolution)
+        import pdb; pdb.set_trace()
 
         # in polar coordinates, distances correspond to angles in cartesian space
         self.flat_eye.get_ommatidial_diameter()  
