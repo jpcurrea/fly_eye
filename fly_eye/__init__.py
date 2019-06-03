@@ -650,7 +650,7 @@ class EyeStack(Stack):
         self.depth_size = depth_size
 
     def get_eye_stack(self, smooth=0, interpolate=True, use_all=False,
-                      layer_smooth=0, padding=.5):
+                      layer_smooth=0, padding=1.1):
         """Generate focus stack of images and then crop out the eye.
         """
         self.focus_stack(smooth, interpolate, use_all, layer_smooth)
@@ -675,7 +675,9 @@ class EyeStack(Stack):
         xs, ys = np.meshgrid(xvals, yvals)
 
         self.eye_3d = np.array(
-            [xs.flatten(), ys.flatten(), self.heights.flatten()])
+            [self.pixel_size * xs.flatten(),
+             self.pixel_size * ys.flatten(),
+             self.depth_size * self.heights.flatten()])
 
         self.eye_3d_masked = np.array(
             [self.pixel_size * xs[self.mask == 1].flatten(),
@@ -740,14 +742,13 @@ class EyeStack(Stack):
         # 2. sample data and interpolate into a grid image
         pred = np.array([self.inclination, self.azimuth])
         r_grid = interpolate.griddata(
-            pred.T, self.eye_3d_colors[0], (incl_new, azim_new), method='linear')
+            pred.T, self.eye_3d_colors[0], (incl_new, azim_new), method='nearest')
         g_grid = interpolate.griddata(
-            pred.T, self.eye_3d_colors[1], (incl_new, azim_new), method='linear')
+            pred.T, self.eye_3d_colors[1], (incl_new, azim_new), method='nearest')
         b_grid = interpolate.griddata(
-            pred.T, self.eye_3d_colors[2], (incl_new, azim_new), method='linear')
+            pred.T, self.eye_3d_colors[2], (incl_new, azim_new), method='nearest')
         self.flat_eye = np.array([r_grid, g_grid, b_grid]).transpose((1, 2, 0))
         self.flat_eye = Eye(self.flat_eye, pixel_size=self.polar_grid_resolution)
-        import pdb; pdb.set_trace()
 
         # in polar coordinates, distances correspond to angles in cartesian space
         self.flat_eye.get_ommatidial_diameter()  
