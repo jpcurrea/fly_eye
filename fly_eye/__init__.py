@@ -746,26 +746,26 @@ class EyeStack(Stack):
         # use linear interpolation for most, and nearest interpolation for far away points
         r_grid_nearest = interpolate.griddata(
             pred.T, self.eye_3d_colors[0], (incl_new, azim_new), method='nearest')
-        r_grid = interpolate.griddata(
-            pred.T, self.eye_3d_colors[0], (incl_new, azim_new), method='linear')
-        nans = np.isnan(r_grid)
-        r_grid[nans] = r_grid_nearest[nans]
+        # r_grid = interpolate.griddata(
+        #     pred.T, self.eye_3d_colors[0], (incl_new, azim_new), method='linear')
+        # nans = np.isnan(r_grid)
+        # r_grid[nans] = r_grid_nearest[nans]
 
         g_grid_nearest = interpolate.griddata(
             pred.T, self.eye_3d_colors[1], (incl_new, azim_new), method='nearest')
-        g_grid = interpolate.griddata(
-            pred.T, self.eye_3d_colors[1], (incl_new, azim_new), method='linear')
-        nans = np.isnan(g_grid)
-        g_grid[nans] = g_grid_nearest[nans]
+        # g_grid = interpolate.griddata(
+        #     pred.T, self.eye_3d_colors[1], (incl_new, azim_new), method='linear')
+        # nans = np.isnan(g_grid)
+        # g_grid[nans] = g_grid_nearest[nans]
 
         b_grid_nearest = interpolate.griddata(
             pred.T, self.eye_3d_colors[2], (incl_new, azim_new), method='nearest')
-        b_grid = interpolate.griddata(
-            pred.T, self.eye_3d_colors[2], (incl_new, azim_new), method='linear')
-        nans = np.isnan(b_grid)
-        b_grid[nans] = b_grid_nearest[nans]
+        # b_grid = interpolate.griddata(
+        #     pred.T, self.eye_3d_colors[2], (incl_new, azim_new), method='linear')
+        # nans = np.isnan(b_grid)
+        # b_grid[nans] = b_grid_nearest[nans]
 
-        self.flat_eye = np.array([r_grid, g_grid, b_grid]).transpose((1, 2, 0))
+        self.flat_eye = np.array([r_grid_nearest, g_grid_nearest, b_grid_nearest]).transpose((1, 2, 0))
         self.flat_eye = Eye(self.flat_eye, pixel_size=self.polar_grid_resolution)
 
         # in polar coordinates, distances correspond to angles in cartesian space
