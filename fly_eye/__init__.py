@@ -372,8 +372,10 @@ class Eye(Layer):
         self.ommatidia = None
         self.pixel_size = pixel_size
 
-    def get_eye_outline(self):
+    def get_eye_outline(self, mask=None):
         self.select_color()
+        if mask is not None:
+            self.cs.mask = mask
         if self.cs.mask is not None:
             conts, h = cv2.findContours(
                 self.cs.mask,
@@ -389,9 +391,9 @@ class Eye(Layer):
             vert2 = np.cumsum(mask[::-1], axis=0)[::-1]
             self.eye_mask = (vert1 * vert2) > 0
 
-    def get_eye_sizes(self, disp=False):
+    def get_eye_sizes(self, disp=False, mask=None):
         if self.eye_contour is None:
-            self.get_eye_outline()
+            self.get_eye_outline(mask=mask)
         self.ellipse = cv2.fitEllipse(self.eye_contour)
         self.eye_length = self.pixel_size*max(self.ellipse[1])
         self.eye_width = self.pixel_size*min(self.ellipse[1])
@@ -401,11 +403,11 @@ class Eye(Layer):
             plt.plot(self.eye_contour[:, 0], self.eye_contour[:, 1])
             plt.show()
 
-    def crop_eye(self, padding=1.05):
+    def crop_eye(self, padding=1.05, mask=None):
         if self.image is None:
             self.load_image()
         if self.ellipse is None:
-            self.get_eye_sizes()
+            self.get_eye_sizes(mask=mask)
         (x, y), (w, h), ang = self.ellipse
         self.angle = ang
         w = padding*w
