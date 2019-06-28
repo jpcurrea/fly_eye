@@ -999,22 +999,24 @@ class ColorSelector():
 
     def select_color(self, dilate=5):
         hsv = colors.rgb_to_hsv(self.frame.copy())
-        low_hue = self.colors[:, 0].min()
-        hi_hue = self.colors[:, 0].max()
-        if low_hue < 0:
-            hues = np.logical_or(
-                hsv[:, :, 0] > 1 + low_hue,
-                hsv[:, :, 0] < hi_hue)
-        else:
-            hues = np.logical_and(
-                hsv[:, :, 0] > low_hue,
-                hsv[:, :, 0] < hi_hue)
+        self.hue_low = self.colors[:, 0].min()
+        self.hue_hi = self.colors[:, 0].max()
+        # hue_low, hue_hi = np.percentile(self.hsv[:, 0], [.5, 99.5])
+        self.sats_low, self.sats_hi = np.percentile(self.hsv[:, 1], [.5, 99.5])
+        # sats_low, sats_hi = self.colors[:, 1].min(), self.colors[:, 1].max()
+        self.vals_low, self.vals_hi = np.percentile(self.hsv[:, 2], [.5, 99.5])
+        # vals_low, vals_hi = self.colors[:, 2].min(), self.colors[:, 2].max()
+        if self.hue_low < 0:
+            self.hue_low = 1 + self.hue_low
+        hues = np.logical_and(
+            hsv[:, :, 0] > self.hue_low,
+            hsv[:, :, 0] < self.hue_hi)
         sats = np.logical_and(
-            hsv[:, :, 1] > self.colors[:, 1].min(),
-            hsv[:, :, 1] < self.colors[:, 1].max())
+            hsv[:, :, 1] > self.sats_low,
+            hsv[:, :, 1] < self.sats_hi)
         vals = np.logical_and(
-            hsv[:, :, 2] > self.colors[:, 2].min(),
-            hsv[:, :, 2] < self.colors[:, 2].max())
+            hsv[:, :, 2] > self.vals_low,
+            hsv[:, :, 2] < self.vals_hi)
         if self.bw:
             self.mask = vals
         else:
