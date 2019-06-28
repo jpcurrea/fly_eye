@@ -291,6 +291,11 @@ class Layer():
             self.image = None
             print("file {} is not an appropriate format.".format(
                 self.filename))
+        if self.image.ndim == 3:
+            if self.image.shape[-1] == 1:
+                self.image = np.squeeze(self.image)
+            elif self.image.shape[-1] > 3:
+                self.image = self.image[..., :-1]
         return self.image
 
     def focus(self, smooth=0):
@@ -335,29 +340,6 @@ class Layer():
         while self.cs.displaying():
             pass
 
-    def start_blob_detector(
-            self, filterByArea=True, minArea=14400, maxArea=422500,
-            filterByConvexity=True, minConvexity=.8,
-            filterByInertia=False, minInertiaRatio=.05,
-            maxInertiaRatio=.25, filterByCircularity=False,
-            maxThreshold=256, minThreshold=50):
-        """Set up the Blob detector with default params for detecting the
-        ticks from our first video.
-        """
-        self.params = cv2.SimpleBlobDetector_Params()
-        self.minThreshold = minThreshold
-        self.maxThreshold = maxThreshold
-        self.params.filterByArea = filterByArea
-        self.params.minArea = minArea
-        self.params.maxArea = maxArea
-        self.params.filterByConvexity = filterByConvexity
-        self.params.minConvexity = minConvexity
-        self.params.filterByInertia = filterByInertia
-        self.params.minInertiaRatio = minInertiaRatio
-        self.params.maxInertiaRatio = maxInertiaRatio
-        self.params.filterByCircularity = filterByCircularity
-        self.detector = cv2.SimpleBlobDetector_create(self.params)
-
 
 class Eye(Layer):
 
@@ -371,21 +353,24 @@ class Eye(Layer):
         self.ellipse = None
         self.ommatidia = None
         self.pixel_size = pixel_size
+        self.mask = None
 
     def get_eye_outline(self, mask=None):
-        self.select_color()
-        if mask is not None:
-            self.cs.mask = mask
-        if self.cs.mask is not None:
+        if mask is None and self.mask is None:
+            self.select_color()
+            self.mask = self.cs.mask
+        elif mask is not None:
+            self.mask = mask
+        if self.mask is not None:
             conts, h = cv2.findContours(
-                self.cs.mask,
+                self.mask,
                 cv2.RETR_TREE,
                 cv2.CHAIN_APPROX_NONE)
             self.conts = conts
             cont = max(conts, key=cv2.contourArea)
             self.cont = cont
             self.eye_contour = cont.reshape((cont.shape[0], cont.shape[-1]))
-            mask = np.zeros(self.cs.mask.shape, int)
+            mask = np.zeros(self.mask.shape, int)
             mask[self.eye_contour[:, 1], self.eye_contour[:, 0]] = 1
             vert1 = np.cumsum(mask, axis=0)
             vert2 = np.cumsum(mask[::-1], axis=0)[::-1]
@@ -419,15 +404,19 @@ class Eye(Layer):
         # out = np.zeros(self.image.shape, dtype='uint8')
         # out[self.cc, self.rr] = self.image[self.cc, self.rr]
         # self.eye = out
-        self.eye = out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
+        self.eye = Eye(out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)])
+        self.eye.mask = self.mask[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
         return self.eye
 
-    def get_ommatidia(self, overlap=5, window_length=100, sigma=3):
+    def get_ommatidia(self, overlap=5, window_length=5, sigma=3, mask=None):
         if self.image is None:
             self.load_image()
-        eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, 1]
+        if self.bw is False:
+            eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, 1]
+        else:
+            eye_sats = self.image.astype('uint8')
         if self.eye_contour is None:
-            self.get_eye_sizes(disp=False)
+            self.get_eye_sizes(disp=False, mask=mask)
         eye_sats[self.eye_mask == False] = eye_sats[self.eye_mask].mean()
 
         eye_fft = np.fft.fft2(eye_sats)
@@ -442,7 +431,7 @@ class Eye(Layer):
         # measure 2d power spectrum as a function of radial distance from center
         # using rolling maxima function to find the bounds of the fundamental spatial frequency
         peaks = []
-        window_size = 5
+        window_size = window_length
         for dist in np.arange(int(dists_2d.max()) - window_size):
             i = np.logical_and(
                 dists_2d.flatten() >= dist, dists_2d.flatten() < dist + window_size)
@@ -483,9 +472,9 @@ class Eye(Layer):
 
         self.ommatidia = np.array([self.pixel_size*xs, self.pixel_size*ys])
 
-    def get_ommatidial_diameter(self, k_neighbors=7, radius=100):
+    def get_ommatidial_diameter(self, k_neighbors=7, radius=100, mask=None, window_length=5):
         if self.ommatidia is None:
-            self.get_ommatidia()
+            self.get_ommatidia(mask=mask, window_length=window_length)
         self.tree = spatial.KDTree(self.ommatidia.T)
         dists, inds = self.tree.query(self.ommatidia.T, k=k_neighbors+1)
         dists = dists[:, 1:]
