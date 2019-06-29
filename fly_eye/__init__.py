@@ -273,6 +273,7 @@ class Layer():
             self.image = None
         elif isinstance(self.filename, np.ndarray):
             self.image = self.filename
+            self.load_image()
         else:
             self.image = None
         self.sob = None
@@ -296,6 +297,9 @@ class Layer():
                 self.image = np.squeeze(self.image)
             elif self.image.shape[-1] > 3:
                 self.image = self.image[..., :-1]
+        if (self.image[..., 0] == self.image.mean(-1)).mean() == 1:
+            self.image = self.image[..., 0]
+            self.bw = True
         return self.image
 
     def focus(self, smooth=0):
@@ -441,11 +445,10 @@ class Eye(Layer):
         peaks = np.array(peaks)
         optimum = np.squeeze(
             peak_local_max(peaks, num_peaks=2, min_distance=10)[-1])  # second highest maximum
-        minima = peak_local_max(peaks.max() - peaks, min_distance=10)
-        minima -= optimum       # distance from optimum
-        
-        lower_bound = max(minima[minima < 0])  # greatest minimum below the optimum
-        lower_bound += optimum
+
+        lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
+                                     num_peaks=1)
+        minima = peak_local_max(peaks.max() - peaks[optimum:], min_distance=10)
         upper_bound = min(minima[minima > 0])  # lowest minimum above the optimum
         upper_bound += optimum
         
@@ -467,7 +470,7 @@ class Eye(Layer):
         # centers[eye.eye_mask] = filtered_eye[eye.eye_mask]
 
         ys, xs = peak_local_max(self.filtered_eye, min_distance=5).T
-        in_eye = self.eye_mask[ys, xs]
+        in_eye = self.mask[ys, xs] == 1
         ys, xs = ys[in_eye], xs[in_eye]
 
         self.ommatidia = np.array([self.pixel_size*xs, self.pixel_size*ys])
