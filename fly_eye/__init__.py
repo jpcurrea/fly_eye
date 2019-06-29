@@ -416,7 +416,7 @@ class Eye(Layer):
         if self.image is None:
             self.load_image()
         if self.bw is False:
-            eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, 1]
+            eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, -1]
         else:
             eye_sats = self.image.astype('uint8')
         if self.eye_contour is None:
