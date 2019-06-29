@@ -449,8 +449,10 @@ class Eye(Layer):
         lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
                                      num_peaks=1)
         minima = peak_local_max(peaks.max() - peaks[optimum:], min_distance=10)
-        upper_bound = min(minima[minima > 0])  # lowest minimum above the optimum
-        upper_bound += optimum
+        if len(minima) != 0:
+            upper_bound = min(minima[minima > 0])  # lowest minimum above the optimum
+        else:
+            upper_bound = int(len(peaks) / 2)
         
         std = (upper_bound - lower_bound)/4  # 
         weights = gaussian(dists_2d, optimum, std)
