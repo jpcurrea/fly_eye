@@ -416,7 +416,8 @@ class Eye(Layer):
         if self.image is None:
             self.load_image()
         if self.bw is False:
-            eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, -1]
+            # eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, -1]
+            eye_sats = rgb_2_gray(self.image.astype('uint8'))
         else:
             eye_sats = self.image.astype('uint8')
         if self.eye_contour is None:
@@ -431,6 +432,7 @@ class Eye(Layer):
 
         xdiffs, ydiffs = xinds - xcenter, yinds - ycenter
         dists_2d = np.sqrt(xdiffs**2 + ydiffs**2)
+        self.dists_2d = dists_2d
 
         # measure 2d power spectrum as a function of radial distance from center
         # using rolling maxima function to find the bounds of the fundamental spatial frequency
@@ -439,7 +441,7 @@ class Eye(Layer):
         for dist in np.arange(int(dists_2d.max()) - window_size):
             i = np.logical_and(
                 dists_2d.flatten() >= dist, dists_2d.flatten() < dist + window_size)
-            peaks += [abs(eye_fft_shifted.flatten()[i]).max()]
+            peaks += [abs(eye_fft_shifted.flatten()[i]).mean()]
         
         # use peaks to find the local maxima and minima
         peaks = np.array(peaks)
@@ -449,13 +451,17 @@ class Eye(Layer):
         lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
                                      num_peaks=1)
         minima = peak_local_max(peaks.max() - peaks[optimum:], min_distance=10)
-        if len(minima) != 0:
-            upper_bound = min(minima[minima > 0])  # lowest minimum above the optimum
-        else:
-            upper_bound = int(len(peaks) / 2)
-        
+        upper_bound = 2 * optimum - lower_bound
+
         std = (upper_bound - lower_bound)/4  # 
-        weights = gaussian(dists_2d, optimum, std)
+        # std = .1 * optimum
+        # weights = gaussian(dists_2d, optimum, std)
+        # in_range = np.logical_and(
+        #     dists_2d > optimum - 2*std,
+        #     dists_2d < optimum + 2*std)
+        in_range = dists_2d < optimum + 2*std
+        weights = np.ones(dists_2d.shape)
+        weights[in_range == False] = 0
 
         # using the gaussian weights, invert back to the filtered image
         selection_shifted = np.zeros(eye_fft.shape, dtype=complex)
@@ -463,15 +469,20 @@ class Eye(Layer):
         selection_fft = np.fft.ifftshift(selection_shifted)
         selection = np.fft.ifft2(selection_fft)
 
+        self.peaks = peaks
+        self.weights = weights
+        self.eye_fft_shifted = eye_fft_shifted
+        self.selection_fft = selection_fft
         self.filtered_eye = selection.real
         self.centers = np.zeros(selection.shape)
-        self.centers[self.eye_mask] = self.filtered_eye[self.eye_mask]
+        self.centers[self.mask] = self.filtered_eye[self.mask]
 
         # filtered_eye = selection.real
         # centers = np.zeros(selection.shape)
         # centers[eye.eye_mask] = filtered_eye[eye.eye_mask]
 
-        ys, xs = peak_local_max(self.filtered_eye, min_distance=5).T
+        d = int(np.round(max(self.image.shape) / 150.))
+        ys, xs = peak_local_max(self.filtered_eye, min_distance=d).T
         in_eye = self.mask[ys, xs] == 1
         ys, xs = ys[in_eye], xs[in_eye]
 
