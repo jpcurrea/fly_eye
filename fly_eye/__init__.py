@@ -412,7 +412,8 @@ class Eye(Layer):
         self.eye.mask = self.mask[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
         return self.eye
 
-    def get_ommatidia(self, overlap=5, window_length=5, sigma=3, mask=None):
+    def get_ommatidia(self, overlap=5, window_length=5, sigma=3, mask=None,
+                      white_peak=True):
         if self.image is None:
             self.load_image()
         if self.bw is False:
@@ -446,20 +447,22 @@ class Eye(Layer):
         # use peaks to find the local maxima and minima
         peaks = np.array(peaks)
         optimum = np.squeeze(
-            peak_local_max(peaks, num_peaks=2, min_distance=10)[-1])  # second highest maximum
+            peak_local_max(peaks, num_peaks=10, min_distance=10))  # second highest maximum
+        optimum = min(optimum[optimum > 10])
 
         lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
                                      num_peaks=1)
-        minima = peak_local_max(peaks.max() - peaks[optimum:], min_distance=10)
+        minima = peak_local_max(peaks.max() - peaks[optimum:],
+                                min_distance=10)
         upper_bound = 2 * optimum - lower_bound
 
-        std = (upper_bound - lower_bound)/4  # 
+        # std = (upper_bound - lower_bound)/4  # 
         # std = .1 * optimum
         # weights = gaussian(dists_2d, optimum, std)
         # in_range = np.logical_and(
         #     dists_2d > optimum - 2*std,
         #     dists_2d < optimum + 2*std)
-        in_range = dists_2d < optimum + 2*std
+        in_range = dists_2d < upper_bound
         weights = np.ones(dists_2d.shape)
         weights[in_range == False] = 0
 
@@ -482,15 +485,24 @@ class Eye(Layer):
         # centers[eye.eye_mask] = filtered_eye[eye.eye_mask]
 
         d = int(np.round(max(self.image.shape) / 150.))
-        ys, xs = peak_local_max(self.filtered_eye, min_distance=d).T
+        if white_peak:
+            ys, xs = peak_local_max(self.filtered_eye, min_distance=d).T
+        else:
+            ys, xs = peak_local_max(
+                self.filtered_eye.max() - self.filtered_eye,
+                min_distance=d).T
+            
         in_eye = self.mask[ys, xs] == 1
         ys, xs = ys[in_eye], xs[in_eye]
 
         self.ommatidia = np.array([self.pixel_size*xs, self.pixel_size*ys])
 
-    def get_ommatidial_diameter(self, k_neighbors=7, radius=100, mask=None, window_length=5):
+    def get_ommatidial_diameter(self, k_neighbors=7, radius=100,
+                                mask=None, window_length=5,
+                                white_peak=True):
         if self.ommatidia is None:
-            self.get_ommatidia(mask=mask, window_length=window_length)
+            self.get_ommatidia(mask=mask, window_length=window_length,
+                               white_peak=white_peak)
         self.tree = spatial.KDTree(self.ommatidia.T)
         dists, inds = self.tree.query(self.ommatidia.T, k=k_neighbors+1)
         dists = dists[:, 1:]
@@ -650,7 +662,8 @@ class Stack():
 class EyeStack(Stack):
     """A special stack for handling a focus stack of fly eye images.
     """
-    def __init__(self, dirname, f_type=".jpg", bw=False, pixel_size=1, depth_size=1):
+    def __init__(self, dirname, f_type=".jpg", bw=False,
+                 pixel_size=1, depth_size=1):
         Stack.__init__(self, dirname, f_type, bw)
         self.eye = None
         self.pixel_size = pixel_size
@@ -673,7 +686,7 @@ class EyeStack(Stack):
         self.eye.eye_contour[:, 1] -= min(self.eye.cc)
         # self.eye = Eye(self.eye.eye)
 
-    def get_3d_data(self, averaging_range=5):
+    def get_3d_data(self, averaging_range=5, white_peak=True):
         if self.stack is None:
             self.get_eye_stack()
         height, width = self.heights.shape
@@ -776,7 +789,7 @@ class EyeStack(Stack):
         self.flat_eye = Eye(self.flat_eye, pixel_size=self.polar_grid_resolution)
 
         # in polar coordinates, distances correspond to angles in cartesian space
-        self.flat_eye.get_ommatidial_diameter()  
+        self.flat_eye.get_ommatidial_diameter(white_peak=white_peak)  
         # interommatidial_ange in degrees
         self.interommatidial_angle = self.flat_eye.ommatidial_diameter * 180. / np.pi
         # ommatidial diameter in mm
