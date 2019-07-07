@@ -446,9 +446,10 @@ class Eye(Layer):
         
         # use peaks to find the local maxima and minima
         peaks = np.array(peaks)
+        fs = np.linspace(1, len(peaks) + 1, len(peaks))
         optimum = np.squeeze(
-            peak_local_max(peaks, num_peaks=10, min_distance=10))  # second highest maximum
-        optimum = min(optimum[optimum > 10])
+            peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
+        optimum = min(optimum)
 
         lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
                                      num_peaks=1)
@@ -474,6 +475,7 @@ class Eye(Layer):
 
         self.peaks = peaks
         self.weights = weights
+        self.upper_bound = upper_bound
         self.eye_fft_shifted = eye_fft_shifted
         self.selection_fft = selection_fft
         self.filtered_eye = selection.real
