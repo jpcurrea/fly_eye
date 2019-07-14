@@ -936,7 +936,7 @@ class Video(Stack):
                 progress += 1
                 print_progress(progress, len(self.layers))
         if display:
-            plt.ion()
+            # plt.ion()
             first = True
             for l, (x, y) in zip(self.layers, self.track):
                 # l.load_image()
