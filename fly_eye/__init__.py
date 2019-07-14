@@ -423,7 +423,7 @@ class Eye(Layer):
             eye_sats = self.image.astype('uint8')
         if self.eye_contour is None:
             self.get_eye_sizes(disp=False, mask=mask)
-        eye_sats[self.eye_mask == False] = eye_sats[self.eye_mask].mean()
+        # eye_sats[self.eye_mask == False] = eye_sats[self.eye_mask].mean()
 
         eye_fft = np.fft.fft2(eye_sats)
         eye_fft_shifted = np.fft.fftshift(eye_fft)
