@@ -1013,6 +1013,15 @@ class ColorSelector():
         vals = np.logical_and(
             hsv[:, :, 2] > self.colors[:, 2].min(),
             hsv[:, :, 2] < self.colors[:, 2].max())
+        hues = ndimage.morphology.binary_dilation(
+            hues,
+            iterations=dilate).astype("uint8")
+        sats = ndimage.morphology.binary_dilation(
+            sats,
+            iterations=dilate).astype("uint8")
+        vals = ndimage.morphology.binary_dilation(
+            vals,
+            iterations=dilate).astype("uint8")
         if self.bw:
             self.mask = vals
         else:
