@@ -359,9 +359,9 @@ class Eye(Layer):
         self.pixel_size = pixel_size
         self.mask = None
 
-    def get_eye_outline(self, mask=None):
+    def get_eye_outline(self, mask=None, hue_only=False):
         if mask is None and self.mask is None:
-            self.select_color()
+            self.select_color(hue_only=hue_only)
             self.mask = self.cs.mask
         elif mask is not None:
             self.mask = mask
@@ -380,9 +380,9 @@ class Eye(Layer):
             vert2 = np.cumsum(mask[::-1], axis=0)[::-1]
             self.eye_mask = (vert1 * vert2) > 0
 
-    def get_eye_sizes(self, disp=False, mask=None):
+    def get_eye_sizes(self, disp=False, mask=None, hue_only=False):
         if self.eye_contour is None:
-            self.get_eye_outline(mask=mask)
+            self.get_eye_outline(mask=mask, hue_only=hue_only)
         self.ellipse = cv2.fitEllipse(self.eye_contour)
         self.eye_length = self.pixel_size*max(self.ellipse[1])
         self.eye_width = self.pixel_size*min(self.ellipse[1])
@@ -392,11 +392,11 @@ class Eye(Layer):
             plt.plot(self.eye_contour[:, 0], self.eye_contour[:, 1])
             plt.show()
 
-    def crop_eye(self, padding=1.05, mask=None):
+    def crop_eye(self, padding=1.05, mask=None, hue_only=False):
         if self.image is None:
             self.load_image()
         if self.ellipse is None:
-            self.get_eye_sizes(mask=mask)
+            self.get_eye_sizes(mask=mask, hue_only=hue_only)
         (x, y), (w, h), ang = self.ellipse
         self.angle = ang
         w = padding*w
