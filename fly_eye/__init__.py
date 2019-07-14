@@ -273,6 +273,7 @@ class Layer():
             self.image = None
         elif isinstance(self.filename, np.ndarray):
             self.image = self.filename
+            self.load_image()
         else:
             self.image = None
         self.sob = None
@@ -291,6 +292,14 @@ class Layer():
             self.image = None
             print("file {} is not an appropriate format.".format(
                 self.filename))
+        if self.image.ndim == 3:
+            if self.image.shape[-1] == 1:
+                self.image = np.squeeze(self.image)
+            elif self.image.shape[-1] > 3:
+                self.image = self.image[..., :-1]
+        if (self.image[..., 0] == self.image.mean(-1)).mean() == 1:
+            self.image = self.image[..., 0]
+            self.bw = True
         return self.image
 
     def focus(self, smooth=0):
@@ -335,29 +344,6 @@ class Layer():
         while self.cs.displaying():
             pass
 
-    def start_blob_detector(
-            self, filterByArea=True, minArea=14400, maxArea=422500,
-            filterByConvexity=True, minConvexity=.8,
-            filterByInertia=False, minInertiaRatio=.05,
-            maxInertiaRatio=.25, filterByCircularity=False,
-            maxThreshold=256, minThreshold=50):
-        """Set up the Blob detector with default params for detecting the
-        ticks from our first video.
-        """
-        self.params = cv2.SimpleBlobDetector_Params()
-        self.minThreshold = minThreshold
-        self.maxThreshold = maxThreshold
-        self.params.filterByArea = filterByArea
-        self.params.minArea = minArea
-        self.params.maxArea = maxArea
-        self.params.filterByConvexity = filterByConvexity
-        self.params.minConvexity = minConvexity
-        self.params.filterByInertia = filterByInertia
-        self.params.minInertiaRatio = minInertiaRatio
-        self.params.maxInertiaRatio = maxInertiaRatio
-        self.params.filterByCircularity = filterByCircularity
-        self.detector = cv2.SimpleBlobDetector_create(self.params)
-
 
 class Eye(Layer):
 
@@ -371,27 +357,32 @@ class Eye(Layer):
         self.ellipse = None
         self.ommatidia = None
         self.pixel_size = pixel_size
+        self.mask = None
 
-    def get_eye_outline(self):
-        self.select_color()
-        if self.cs.mask is not None:
+    def get_eye_outline(self, mask=None):
+        if mask is None and self.mask is None:
+            self.select_color()
+            self.mask = self.cs.mask
+        elif mask is not None:
+            self.mask = mask
+        if self.mask is not None:
             conts, h = cv2.findContours(
-                self.cs.mask,
+                self.mask,
                 cv2.RETR_TREE,
                 cv2.CHAIN_APPROX_NONE)
             self.conts = conts
             cont = max(conts, key=cv2.contourArea)
             self.cont = cont
             self.eye_contour = cont.reshape((cont.shape[0], cont.shape[-1]))
-            mask = np.zeros(self.cs.mask.shape, int)
+            mask = np.zeros(self.mask.shape, int)
             mask[self.eye_contour[:, 1], self.eye_contour[:, 0]] = 1
             vert1 = np.cumsum(mask, axis=0)
             vert2 = np.cumsum(mask[::-1], axis=0)[::-1]
             self.eye_mask = (vert1 * vert2) > 0
 
-    def get_eye_sizes(self, disp=False):
+    def get_eye_sizes(self, disp=False, mask=None):
         if self.eye_contour is None:
-            self.get_eye_outline()
+            self.get_eye_outline(mask=mask)
         self.ellipse = cv2.fitEllipse(self.eye_contour)
         self.eye_length = self.pixel_size*max(self.ellipse[1])
         self.eye_width = self.pixel_size*min(self.ellipse[1])
@@ -401,11 +392,11 @@ class Eye(Layer):
             plt.plot(self.eye_contour[:, 0], self.eye_contour[:, 1])
             plt.show()
 
-    def crop_eye(self, padding=1.05):
+    def crop_eye(self, padding=1.05, mask=None):
         if self.image is None:
             self.load_image()
         if self.ellipse is None:
-            self.get_eye_sizes()
+            self.get_eye_sizes(mask=mask)
         (x, y), (w, h), ang = self.ellipse
         self.angle = ang
         w = padding*w
@@ -417,15 +408,21 @@ class Eye(Layer):
         # out = np.zeros(self.image.shape, dtype='uint8')
         # out[self.cc, self.rr] = self.image[self.cc, self.rr]
         # self.eye = out
-        self.eye = out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
+        self.eye = Eye(out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)])
+        self.eye.mask = self.mask[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
         return self.eye
 
-    def get_ommatidia(self, overlap=5, window_length=100, sigma=3):
+    def get_ommatidia(self, overlap=5, window_length=5, sigma=3, mask=None,
+                      white_peak=True):
         if self.image is None:
             self.load_image()
-        eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, 1]
+        if self.bw is False:
+            # eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, -1]
+            eye_sats = rgb_2_gray(self.image.astype('uint8'))
+        else:
+            eye_sats = self.image.astype('uint8')
         if self.eye_contour is None:
-            self.get_eye_sizes(disp=False)
+            self.get_eye_sizes(disp=False, mask=mask)
         eye_sats[self.eye_mask == False] = eye_sats[self.eye_mask].mean()
 
         eye_fft = np.fft.fft2(eye_sats)
@@ -436,30 +433,39 @@ class Eye(Layer):
 
         xdiffs, ydiffs = xinds - xcenter, yinds - ycenter
         dists_2d = np.sqrt(xdiffs**2 + ydiffs**2)
+        self.dists_2d = dists_2d
 
         # measure 2d power spectrum as a function of radial distance from center
         # using rolling maxima function to find the bounds of the fundamental spatial frequency
         peaks = []
-        window_size = 5
+        window_size = window_length
         for dist in np.arange(int(dists_2d.max()) - window_size):
             i = np.logical_and(
                 dists_2d.flatten() >= dist, dists_2d.flatten() < dist + window_size)
-            peaks += [abs(eye_fft_shifted.flatten()[i]).max()]
+            peaks += [abs(eye_fft_shifted.flatten()[i]).mean()]
         
         # use peaks to find the local maxima and minima
         peaks = np.array(peaks)
+        fs = np.linspace(1, len(peaks) + 1, len(peaks))
         optimum = np.squeeze(
-            peak_local_max(peaks, num_peaks=2, min_distance=10)[-1])  # second highest maximum
-        minima = peak_local_max(peaks.max() - peaks, min_distance=10)
-        minima -= optimum       # distance from optimum
-        
-        lower_bound = max(minima[minima < 0])  # greatest minimum below the optimum
-        lower_bound += optimum
-        upper_bound = min(minima[minima > 0])  # lowest minimum above the optimum
-        upper_bound += optimum
-        
-        std = (upper_bound - lower_bound)/4  # 
-        weights = gaussian(dists_2d, optimum, std)
+            peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
+        optimum = min(optimum)
+
+        lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
+                                     num_peaks=1)
+        minima = peak_local_max(peaks.max() - peaks[optimum:],
+                                min_distance=10)
+        upper_bound = 2 * optimum - lower_bound
+
+        # std = (upper_bound - lower_bound)/4  # 
+        # std = .1 * optimum
+        # weights = gaussian(dists_2d, optimum, std)
+        # in_range = np.logical_and(
+        #     dists_2d > optimum - 2*std,
+        #     dists_2d < optimum + 2*std)
+        in_range = dists_2d < upper_bound
+        weights = np.ones(dists_2d.shape)
+        weights[in_range == False] = 0
 
         # using the gaussian weights, invert back to the filtered image
         selection_shifted = np.zeros(eye_fft.shape, dtype=complex)
@@ -467,23 +473,38 @@ class Eye(Layer):
         selection_fft = np.fft.ifftshift(selection_shifted)
         selection = np.fft.ifft2(selection_fft)
 
+        self.peaks = peaks
+        self.weights = weights
+        self.upper_bound = upper_bound
+        self.eye_fft_shifted = eye_fft_shifted
+        self.selection_fft = selection_fft
         self.filtered_eye = selection.real
         self.centers = np.zeros(selection.shape)
-        self.centers[self.eye_mask] = self.filtered_eye[self.eye_mask]
+        self.centers[self.mask] = self.filtered_eye[self.mask]
 
         # filtered_eye = selection.real
         # centers = np.zeros(selection.shape)
         # centers[eye.eye_mask] = filtered_eye[eye.eye_mask]
 
-        ys, xs = peak_local_max(self.filtered_eye, min_distance=5).T
-        in_eye = self.eye_mask[ys, xs]
+        d = int(np.round(max(self.image.shape) / 150.))
+        if white_peak:
+            ys, xs = peak_local_max(self.filtered_eye, min_distance=d).T
+        else:
+            ys, xs = peak_local_max(
+                self.filtered_eye.max() - self.filtered_eye,
+                min_distance=d).T
+            
+        in_eye = self.mask[ys, xs] == 1
         ys, xs = ys[in_eye], xs[in_eye]
 
         self.ommatidia = np.array([self.pixel_size*xs, self.pixel_size*ys])
 
-    def get_ommatidial_diameter(self, k_neighbors=7, radius=100):
+    def get_ommatidial_diameter(self, k_neighbors=7, radius=100,
+                                mask=None, window_length=5,
+                                white_peak=True):
         if self.ommatidia is None:
-            self.get_ommatidia()
+            self.get_ommatidia(mask=mask, window_length=window_length,
+                               white_peak=white_peak)
         self.tree = spatial.KDTree(self.ommatidia.T)
         dists, inds = self.tree.query(self.ommatidia.T, k=k_neighbors+1)
         dists = dists[:, 1:]
@@ -643,7 +664,8 @@ class Stack():
 class EyeStack(Stack):
     """A special stack for handling a focus stack of fly eye images.
     """
-    def __init__(self, dirname, f_type=".jpg", bw=False, pixel_size=1, depth_size=1):
+    def __init__(self, dirname, f_type=".jpg", bw=False,
+                 pixel_size=1, depth_size=1):
         Stack.__init__(self, dirname, f_type, bw)
         self.eye = None
         self.pixel_size = pixel_size
@@ -666,7 +688,7 @@ class EyeStack(Stack):
         self.eye.eye_contour[:, 1] -= min(self.eye.cc)
         # self.eye = Eye(self.eye.eye)
 
-    def get_3d_data(self, averaging_range=5):
+    def get_3d_data(self, averaging_range=5, white_peak=True):
         if self.stack is None:
             self.get_eye_stack()
         height, width = self.heights.shape
@@ -769,7 +791,7 @@ class EyeStack(Stack):
         self.flat_eye = Eye(self.flat_eye, pixel_size=self.polar_grid_resolution)
 
         # in polar coordinates, distances correspond to angles in cartesian space
-        self.flat_eye.get_ommatidial_diameter()  
+        self.flat_eye.get_ommatidial_diameter(white_peak=white_peak)  
         # interommatidial_ange in degrees
         self.interommatidial_angle = self.flat_eye.ommatidial_diameter * 180. / np.pi
         # ommatidial diameter in mm
@@ -997,19 +1019,21 @@ class ColorSelector():
 
     def select_color(self, dilate=5):
         hsv = colors.rgb_to_hsv(self.frame.copy())
-        low_hue = self.colors[:, 0].min()
-        hi_hue = self.colors[:, 0].max()
-        if low_hue < 0:
-            hues = np.logical_or(
-                hsv[:, :, 0] > 1 + low_hue,
-                hsv[:, :, 0] < hi_hue)
-        else:
-            hues = np.logical_and(
-                hsv[:, :, 0] > low_hue,
-                hsv[:, :, 0] < hi_hue)
+        self.hue_low = self.colors[:, 0].min()
+        self.hue_hi = self.colors[:, 0].max()
+        # hue_low, hue_hi = np.percentile(self.hsv[:, 0], [.5, 99.5])
+        self.sats_low, self.sats_hi = np.percentile(self.hsv[:, 1], [.5, 99.5])
+        # sats_low, sats_hi = self.colors[:, 1].min(), self.colors[:, 1].max()
+        self.vals_low, self.vals_hi = np.percentile(self.hsv[:, 2], [.5, 99.5])
+        # vals_low, vals_hi = self.colors[:, 2].min(), self.colors[:, 2].max()
+        if self.hue_low < 0:
+            self.hue_low = 1 + self.hue_low
+        hues = np.logical_and(
+            hsv[:, :, 0] > self.hue_low,
+            hsv[:, :, 0] < self.hue_hi)
         sats = np.logical_and(
-            hsv[:, :, 1] > self.colors[:, 1].min(),
-            hsv[:, :, 1] < self.colors[:, 1].max())
+            hsv[:, :, 1] > self.sats_low,
+            hsv[:, :, 1] < self.sats_hi)
         vals = np.logical_and(
             hsv[:, :, 2] > self.colors[:, 2].min(),
             hsv[:, :, 2] < self.colors[:, 2].max())
