@@ -1050,7 +1050,7 @@ class ColorSelector():
         if self.bw:
             self.mask = vals
         else:
-            if hue_only:
+            if self.hue_only:
                 self.mask = hues
             else:
                 self.mask = np.logical_and(hues, sats, vals)
