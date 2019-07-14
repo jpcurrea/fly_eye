@@ -336,13 +336,13 @@ class Layer():
         mask = ndimage.morphology.binary_dilation(thresh).astype("uint8")
         self.mask = 255*mask
 
-    def select_color(self, range=None):
+    def select_color(self, range=None, hue_only=False):
         if self.image is None:
             self.load_image()
-        self.cs = ColorSelector(self.image, bw=self.bw)
+        self.cs = ColorSelector(self.image, bw=self.bw, hue_only=hue_only)
         self.cs.start_up()
-        while self.cs.displaying():
-            pass
+        # while self.cs.displaying():
+        #     pass
 
 
 class Eye(Layer):
