@@ -434,11 +434,14 @@ class Eye(Layer):
         xdiffs, ydiffs = xinds - xcenter, yinds - ycenter
         dists_2d = np.sqrt(xdiffs**2 + ydiffs**2)
         self.dists_2d = dists_2d
+        self.angs_2d = np.arctan2(yinds - ycenter, xinds - xcenter)
+        i = self.angs_2d < 0
+        self.angs_2d[i] = self.angs_2d[i] + np.pi
 
         # measure 2d power spectrum as a function of radial distance from center
         # using rolling maxima function to find the bounds of the fundamental spatial frequency
         peaks = []
-        window_size = window_length
+        window_size = 3
         for dist in np.arange(int(dists_2d.max()) - window_size):
             i = np.logical_and(
                 dists_2d.flatten() >= dist, dists_2d.flatten() < dist + window_size)
@@ -451,11 +454,12 @@ class Eye(Layer):
             peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
         optimum = min(optimum)
 
-        lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
-                                     num_peaks=1)
-        minima = peak_local_max(peaks.max() - peaks[optimum:],
-                                min_distance=10)
-        upper_bound = 2 * optimum - lower_bound
+        # lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
+        #                              num_peaks=1)
+        # minima = peak_local_max(peaks.max() - peaks[optimum:],
+        #                         min_distance=10)
+        # upper_bound = 2 * optimum - lower_bound
+        upper_bound = 1.5 * optimum
 
         # std = (upper_bound - lower_bound)/4  # 
         # std = .1 * optimum
