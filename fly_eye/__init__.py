@@ -1027,9 +1027,12 @@ class ColorSelector():
         # sats_low, sats_hi = self.colors[:, 1].min(), self.colors[:, 1].max()
         self.vals_low, self.vals_hi = np.percentile(self.hsv[:, 2], [2.5, 97.5])
         # vals_low, vals_hi = self.colors[:, 2].min(), self.colors[:, 2].max()
-        if self.hue_low < 0:
+        if self.hue_low < 0:    # if range overlaps 0, use or logic
             self.hue_low = 1 + self.hue_low
-        hues = np.logical_and(
+            comp_func = np.logical_or
+        else:
+            comp_func = np.logical_and
+        hues = comp_func(
             hsv[:, :, 0] > self.hue_low,
             hsv[:, :, 0] < self.hue_hi)
         sats = np.logical_and(
