@@ -1022,9 +1022,9 @@ class ColorSelector():
         self.hue_low = self.colors[:, 0].min()
         self.hue_hi = self.colors[:, 0].max()
         # hue_low, hue_hi = np.percentile(self.hsv[:, 0], [.5, 99.5])
-        self.sats_low, self.sats_hi = np.percentile(self.hsv[:, 1], [.5, 99.5])
+        self.sats_low, self.sats_hi = np.percentile(self.hsv[:, 1], [2.5, 97.5])
         # sats_low, sats_hi = self.colors[:, 1].min(), self.colors[:, 1].max()
-        self.vals_low, self.vals_hi = np.percentile(self.hsv[:, 2], [.5, 99.5])
+        self.vals_low, self.vals_hi = np.percentile(self.hsv[:, 2], [2.5, 97.5])
         # vals_low, vals_hi = self.colors[:, 2].min(), self.colors[:, 2].max()
         if self.hue_low < 0:
             self.hue_low = 1 + self.hue_low
