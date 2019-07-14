@@ -962,7 +962,7 @@ class ColorSelector():
     2 standard deviations of the selection.
     """
 
-    def __init__(self, frame, bw=False):
+    def __init__(self, frame, bw=False, hue_only=False):
         from matplotlib import gridspec
         self.bw = bw
         if isinstance(frame, str):
@@ -970,6 +970,7 @@ class ColorSelector():
         self.frame = frame
         self.colors = np.array([[0, 0, 0], [1, 1, 255]])
         self.fig = plt.figure(figsize=(8, 8), num="Color Selector")
+        self.hue_only = hue_only
         gs = gridspec.GridSpec(6, 4)
 
         self.pic = self.fig.add_subplot(gs[:3, 1:])
@@ -1049,7 +1050,10 @@ class ColorSelector():
         if self.bw:
             self.mask = vals
         else:
-            self.mask = np.logical_and(hues, sats, vals)
+            if hue_only:
+                self.mask = hues
+            else:
+                self.mask = np.logical_and(hues, sats, vals)
         # cv2.inRange(hsv, np.array(colors[0]), np.array(colors[1]))
         # mask = cv2.erode(mask, None, iterations=2)
         self.mask = ndimage.morphology.binary_dilation(
