@@ -19,6 +19,7 @@ from scipy.ndimage.measurements import center_of_mass
 
 import cv2
 from rolling_window import rolling_window
+from bird_call import Recording
 
 def rgb_2_gray(rgb):
     return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
@@ -832,15 +833,17 @@ class Video(Stack):
                 "-show_entries", "stream=avg_frame_rate", "-of",
                 "default=noprint_wrappers=1:nokey=1",
                 self.filename])
-            self.fps = self.fps.split("/")
-            self.fps = float(self.fps[0])/float(self.fps[1])
+            self.fps = int(str(fps))
+            # self.fps = int(self.fps.split("/"))
+            # self.fps = float(self.fps[0])/float(self.fps[1])
             if os.path.isdir(self.dirname) is False:
                 os.mkdir(self.dirname)
             try:
-                failed = subprocess.check_output(
-                    ["ffmpeg", "-i", self.filename,
-                     "-vf", "scale=720:-1",
-                     "./{}/frame%05d{}".format(self.dirname, self.f_type)])
+                if len(os.listdir(self.dirname))  == 0:
+                    failed = subprocess.check_output(
+                        ["ffmpeg", "-i", self.filename,
+                         "-vf", "scale=720:-1",
+                         "./{}/frame%05d{}".format(self.dirname, self.f_type)])
             except subprocess.CalledProcessError:
                 print("failed to parse video into {}\
                 stack!".format(self.f_type))
@@ -851,7 +854,7 @@ class Video(Stack):
                      "-ar", "44100",
                      "-ab", "128",
                      "-vn", audio_fname])
-                self.audio = self.aud.Recording(audio_fname, trim=False)
+                self.audio = Recording(audio_fname, trim=False)
             except subprocess.CalledProcessError:
                 print("failed to get audio from video!")
 
