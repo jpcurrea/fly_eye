@@ -450,6 +450,7 @@ class Eye(Layer):
         
         # use peaks to find the local maxima and minima
         peaks = np.array(peaks)
+        self.peaks = peaks
         fs = np.linspace(1, len(peaks) + 1, len(peaks))
         optimum = np.squeeze(
             peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
@@ -461,6 +462,7 @@ class Eye(Layer):
         #                         min_distance=10)
         # upper_bound = 2 * optimum - lower_bound
         upper_bound = 1.5 * optimum
+        self.upper_bound = upper_bound
 
         # std = (upper_bound - lower_bound)/4  # 
         # std = .1 * optimum
@@ -471,6 +473,7 @@ class Eye(Layer):
         in_range = dists_2d < upper_bound
         weights = np.ones(dists_2d.shape)
         weights[in_range == False] = 0
+        self.weights = weights
 
         # using the gaussian weights, invert back to the filtered image
         selection_shifted = np.zeros(eye_fft.shape, dtype=complex)
@@ -478,9 +481,6 @@ class Eye(Layer):
         selection_fft = np.fft.ifftshift(selection_shifted)
         selection = np.fft.ifft2(selection_fft)
 
-        self.peaks = peaks
-        self.weights = weights
-        self.upper_bound = upper_bound
         self.eye_fft_shifted = eye_fft_shifted
         self.selection_fft = selection_fft
         self.filtered_eye = selection.real
