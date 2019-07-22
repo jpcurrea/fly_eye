@@ -452,7 +452,6 @@ class Eye(Layer):
         peaks = np.array(peaks)
         self.peaks = peaks
         fs = np.linspace(1, len(peaks) + 1, len(peaks))
-        import pdb; pdb.set_trace()
         # optimum = peak_local_max(fs*peaks, num_peaks=10, min_distance=10)  # second highest maximum
         # optimum = np.squeeze(
         #     peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
