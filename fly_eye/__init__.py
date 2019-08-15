@@ -452,6 +452,7 @@ class Eye(Layer):
         peaks = np.array(peaks)
         self.peaks = peaks
         fs = np.linspace(1, len(peaks) + 1, len(peaks))
+
         # optimum = peak_local_max(fs*peaks, num_peaks=10, min_distance=10)  # second highest maximum
         # optimum = np.squeeze(
         #     peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
@@ -494,6 +495,8 @@ class Eye(Layer):
         # centers = np.zeros(selection.shape)
         # centers[eye.eye_mask] = filtered_eye[eye.eye_mask]
 
+        # use optimization function for find min_distance that minimizes
+        # the variance distances between centers and their nearest neighbors
         d = int(np.round(max(self.image.shape) / 150.))
         if white_peak:
             ys, xs = peak_local_max(self.filtered_eye, min_distance=d).T
@@ -684,8 +687,9 @@ class EyeStack(Stack):
                       layer_smooth=0, padding=1.1):
         """Generate focus stack of images and then crop out the eye.
         """
-        self.focus_stack(smooth, interpolate, use_all, layer_smooth)
-        self.eye = Eye(self.stack.astype('uint8'))
+        if self.eye is None:
+            self.focus_stack(smooth, interpolate, use_all, layer_smooth)
+            self.eye = Eye(self.stack.astype('uint8'))
         self.eye.crop_eye(padding)
         self.heights = self.heights[min(self.eye.cc):max(self.eye.cc),
                                     min(self.eye.rr):max(self.eye.rr)]
