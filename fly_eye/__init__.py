@@ -414,7 +414,7 @@ class Eye(Layer):
         return self.eye
 
     def get_ommatidia(self, overlap=5, window_length=5, sigma=3, mask=None,
-                      white_peak=True, min_facets=100):
+                      white_peak=True, min_facets=25):
         if self.image is None:
             self.load_image()
         if self.bw is False:
