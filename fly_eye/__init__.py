@@ -515,7 +515,6 @@ class Eye(Layer):
         for dist in range(1, min(self.filtered_eye.shape)):
             while std < old_std:
                 old_std = std
-                old_xs, old_ys = xs, ys
                 ys, xs = peak_local_max(self.filtered_eye, min_distance=dist).T
                 tree = spatial.KDTree(arr)
                 dists, inds = tree.query(arr, k=2)
