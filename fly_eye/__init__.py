@@ -500,13 +500,28 @@ class Eye(Layer):
         # use optimization function for find min_distance that minimizes
         # the variance distances between centers and their nearest neighbors
         d = int(np.round(max(self.image.shape) / 150.))
-        if white_peak:
-            ys, xs = peak_local_max(self.filtered_eye, min_distance=d).T
-        else:
-            ys, xs = peak_local_max(
-                self.filtered_eye.max() - self.filtered_eye,
-                min_distance=d).T
-            
+        # if white_peak:
+        #     ys, xs = peak_local_max(self.filtered_eye, min_distance=d).T
+        # else:
+        #     ys, xs = peak_local_max(
+        #         self.filtered_eye.max() - self.filtered_eye,
+        #         min_distance=d).T
+        if not white_peak:
+            self.filtered_eye = self.filtered_eye.max() - self.filtered_eye,
+
+        old_std = np.inf
+        std = 0
+        for dist in range(1, min(self.filtered_eye.shape)):
+            while std < old_std:
+                old_std = std
+                old_xs, old_ys = xs, ys
+                ys, xs = peak_local_max(self.filtered_eye, min_distance=dist).T
+                tree = spatial.KDTree(arr)
+                dists, inds = tree.query(arr, k=2)
+                dists = dists[:, 1]
+                std = dists.std()
+        
+        xs, ys = old_xs, old_ys
         in_eye = self.mask[ys, xs] == 1
         ys, xs = ys[in_eye], xs[in_eye]
 
