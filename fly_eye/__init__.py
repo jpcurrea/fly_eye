@@ -458,7 +458,7 @@ class Eye(Layer):
         #     peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
         optimum = np.squeeze(
             peak_local_max(peaks, num_peaks=5, exclude_border=True))
-        optimum = optimim[optimum > np.sqrt(min_facets)]
+        optimum = optimum[optimum > np.sqrt(min_facets)]
         optimum = optimum.min()
 
         # lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
