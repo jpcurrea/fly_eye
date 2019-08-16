@@ -512,7 +512,7 @@ class Eye(Layer):
         old_std = np.inf
         std = np.inf
         for dist in range(1, min(self.filtered_eye.shape)):
-            while std < old_std:
+            while std <= old_std:
                 old_std = std
                 arr = peak_local_max(self.filtered_eye, min_distance=dist)
                 ys, xs = arr.T
