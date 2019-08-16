@@ -511,6 +511,7 @@ class Eye(Layer):
 
         old_std = np.inf
         std = 0
+        old_xs, old_ys = 0, 0
         for dist in range(1, min(self.filtered_eye.shape)):
             while std < old_std:
                 old_std = std
