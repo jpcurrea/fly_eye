@@ -414,7 +414,7 @@ class Eye(Layer):
         return self.eye
 
     def get_ommatidia(self, overlap=5, window_length=5, sigma=3, mask=None,
-                      white_peak=True):
+                      white_peak=True, min_facets=100):
         if self.image is None:
             self.load_image()
         if self.bw is False:
@@ -457,7 +457,8 @@ class Eye(Layer):
         # optimum = np.squeeze(
         #     peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
         optimum = np.squeeze(
-            peak_local_max(fs * peaks, num_peaks=1, exclude_border=True))
+            peak_local_max(peaks, num_peaks=5, exclude_border=True))
+        optimum = optimim[optimum > np.sqrt(min_facets)]
         optimum = optimum.min()
 
         # lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
