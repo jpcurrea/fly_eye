@@ -13,7 +13,7 @@ from skimage.draw import ellipse as Ellipse
 from skimage.feature import peak_local_max
 
 from numpy.linalg import eig, inv, norm
-from scipy import spatial, ndimage, stats, signal, interpolate
+from scipy import spatial, ndimage, stats, signal, interpolate, ndimage
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.measurements import center_of_mass
 
@@ -380,19 +380,27 @@ class Eye(Layer):
         elif mask is not None:
             self.mask = mask
         if self.mask is not None:
-            conts, h = cv2.findContours(
-                self.mask,
-                cv2.RETR_TREE,
-                cv2.CHAIN_APPROX_NONE)
-            self.conts = conts
-            cont = max(conts, key=cv2.contourArea)
-            self.cont = cont
-            self.eye_contour = cont.reshape((cont.shape[0], cont.shape[-1]))
-            mask = np.zeros(self.mask.shape, int)
-            mask[self.eye_contour[:, 1], self.eye_contour[:, 0]] = 1
-            vert1 = np.cumsum(mask, axis=0)
-            vert2 = np.cumsum(mask[::-1], axis=0)[::-1]
-            self.eye_mask = (vert1 * vert2) > 0
+            if self.mask.dtype == bool:
+                contour = skimage.measure.find_contours(
+                    (255/self.mask.max()) * self.mask.astype(int), 256/2)
+                contour = np.concatenate(contour)
+                self.eye_contour = np.round(contour).astype(int)
+                self.conts = contour
+                self.eye_mask = self.mask
+            else:
+                conts, h = cv2.findContours(
+                    mask,
+                    cv2.RETR_TREE,
+                    cv2.CHAIN_APPROX_NONE)
+                cont = max(conts, key=cv2.contourArea)
+                self.cont = cont
+                self.eye_contour = cont.reshape(
+                    (cont.shape[0], cont.shape[-1]))
+                mask = np.zeros(self.mask.shape, int)
+                mask[self.eye_contour[:, 0], self.eye_contour[:, 1]] = 1
+                vert1 = np.cumsum(mask, axis=0)
+                vert2 = np.cumsum(mask[::-1], axis=1)[::-1]
+                self.eye_mask = (vert1 * vert2) > 0
 
     def get_eye_sizes(self, disp=False, mask=None, hue_only=False):
         if self.eye_contour is None:
