@@ -1,5 +1,6 @@
 import os
 import PIL
+import pickle
 import math
 import numpy as np
 import subprocess
@@ -273,6 +274,11 @@ def fundamental_maxima(img, disp=True, p=5, window=5):
         x = []
         y = []
     return x, y
+
+
+def load_Eye(fn):
+    with open(fn, "rb") as pickle_file:
+        return pickle.load(self, pickle_file)
 
 
 class Layer():
@@ -597,6 +603,11 @@ class Eye(Layer):
 
         self.ommatidial_diameter = self.ommatidial_dists[near_center].mean()
         self.ommatidial_diameter_SD = self.ommatidial_dists[near_center].std()
+
+    def save(self, fn):
+        """Save using pickle."""
+        with open(fn, "wb") as pickle_file:
+            pickle.dump(self, pickle_file)
 
 
 class Stack():
