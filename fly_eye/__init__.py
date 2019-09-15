@@ -482,17 +482,18 @@ class Eye(Layer):
         # use peaks to find the local maxima and minima
         peaks = np.array(peaks)
         self.peaks = peaks
-        fs = np.linspace(1, len(peaks) + 1, len(peaks))
-
+        fs = np.arange(len(peaks)) + 1
         # optimum = peak_local_max(fs*peaks, num_peaks=10, min_distance=10)  # second highest maximum
         # optimum = np.squeeze(
         #     peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
+        min_fs = min(fs[fs > np.sqrt(min_facets)])
+        max_fs = max(fs[fs < np.sqrt(max_facets)])
         i = np.logical_and(
-            fs > np.sqrt(min_facets),
-            fs < np.sqrt(max_facets))
+            fs >= min_fs,
+            fs <= max_fs)
         optimum = np.squeeze(
-            peak_local_max((fs*peaks)[i], num_peaks=2, exclude_border=True))
-        optimum = optimum[np.argmax(peaks[optimum])]
+            peak_local_max((fs*peaks)[i], num_peaks=1, exclude_border=True))
+        optimum = fs[i][optimum]
 
         # lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
         #                              num_peaks=1)
@@ -562,15 +563,17 @@ class Eye(Layer):
         std = 0
         # for num, dist in range(1, int(min(self.filtered_eye.shape)/5)):
         old_xs, old_ys = [], []
-        min_dist = int(np.floor(min(self.image.shape[:2])/np.sqrt(max_facets)))
+        # min_dist = int(np.floor(min(self.image.shape[:2])/np.sqrt(max_facets)))
+        min_dist = 1
         max_dist = int(np.ceil(max(self.image.shape[:2])/np.sqrt(min_facets)))
+        stds = []
         for num, dist in enumerate(range(min_dist, max_dist)[::-1]):
             print(dist)
-            if std <= old_std:
-                std, (xs, ys) = lattice_std(dist)
-            else:
-                break
-            if std > 0:
+            std, (xs, ys) = lattice_std(dist)
+            stds += [std]
+            # plt.scatter(xs, ys)
+            # plt.show()
+            if std > 0 and std < old_std:
                 old_std = std
                 old_xs, old_ys = xs, ys
 
