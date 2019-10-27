@@ -390,12 +390,13 @@ class Eye(Layer):
                 "mask and image must have the same shape. Instead, mask.shape() = {self.mask.shape} and image.shape() = {self.image.shape}")
         if self.mask is not None:
             if self.mask.dtype == bool:
-                contour = skimage.measure.find_contours(
-                    (255/self.mask.max()) * self.mask.astype(int), 256/2)
-                contour = np.concatenate(contour)
-                self.eye_contour = np.round(contour).astype(int)
-                self.conts = contour
-                self.eye_mask = self.mask
+                if self.mask.mean() < 1:
+                    contour = skimage.measure.find_contours(
+                        (255/self.mask.max()) * self.mask.astype(int), 256/2)
+                    contour = np.concatenate(contour)
+                    self.eye_contour = np.round(contour).astype(int)
+                    self.conts = contour
+                    self.eye_mask = self.mask
             else:
                 conts, h = cv2.findContours(
                     mask,
@@ -406,8 +407,6 @@ class Eye(Layer):
                 self.eye_contour = cont.reshape(
                     (cont.shape[0], cont.shape[-1]))
                 mask = np.zeros(self.mask.shape, int)
-                import pdb
-                pdb.set_trace()
                 # mask[self.eye_contour[:, 0], self.eye_contour[:, 1]] = 1
                 mask[self.eye_contour[:, 1], self.eye_contour[:, 0]] = 1
                 vert1 = np.cumsum(mask, axis=0)
@@ -435,7 +434,7 @@ class Eye(Layer):
         self.angle = ang
         w = padding*w
         h = padding*h
-        self.rr, self.cc = Ellipse(x, y, w/2., h/2.,
+        self.cc, self.rr = Ellipse(x, y, w/2., h/2.,
                                    shape=self.image.shape[:2][::-1],
                                    rotation=np.deg2rad(ang))
         out = np.copy(self.image)
@@ -462,6 +461,7 @@ class Eye(Layer):
             self.get_eye_sizes(disp=False, mask=mask)
         # eye_sats[self.eye_mask == False] = eye_sats[self.eye_mask].mean()
 
+        # eye_sats -= eye_sats.mean()
         eye_fft = np.fft.fft2(eye_sats)
         eye_fft_shifted = np.fft.fftshift(eye_fft)
 
@@ -492,13 +492,14 @@ class Eye(Layer):
         # optimum = peak_local_max(fs*peaks, num_peaks=10, min_distance=10)  # second highest maximum
         # optimum = np.squeeze(
         #     peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
-        min_fs = min(fs[fs > np.sqrt(min_facets)])
-        max_fs = max(fs[fs < np.sqrt(max_facets)])
+        min_fs = min(fs[fs > np.sqrt(min_facets)]) / 2
+        max_fs = max(fs[fs < np.sqrt(max_facets)]) * 2
         i = np.logical_and(
             fs >= min_fs,
             fs <= max_fs)
-        optimum = np.squeeze(
-            peak_local_max((fs*peaks)[i], num_peaks=1, exclude_border=True))
+        # optimum = np.squeeze(
+        #     peak_local_max((fs*peaks)[i], num_peaks=1, exclude_border=True))
+        optimum = np.argmax((fs*peaks)[i])
         optimum = fs[i][optimum]
 
         # lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
@@ -547,7 +548,7 @@ class Eye(Layer):
         #         self.filtered_eye.max() - self.filtered_eye,
         #         min_distance=d).T
         if not white_peak:
-            self.filtered_eye = self.filtered_eye.max() - self.filtered_eye,
+            self.filtered_eye = self.filtered_eye.max() - self.filtered_eye
 
         def lattice_std(dist, crop=crop):
             arr = peak_local_max(self.filtered_eye, min_distance=dist,
@@ -588,11 +589,9 @@ class Eye(Layer):
             [self.pixel_size*old_xs, self.pixel_size*old_ys])
 
     def get_ommatidial_diameter(self, k_neighbors=7, radius=100,
-                                mask=None, window_length=5,
-                                white_peak=True):
+                                mask=None, white_peak=True):
         if self.ommatidia is None:
-            self.get_ommatidia(mask=mask, window_length=window_length,
-                               white_peak=white_peak)
+            self.get_ommatidia(mask=mask, white_peak=white_peak)
         self.tree = spatial.KDTree(self.ommatidia.T)
         dists, inds = self.tree.query(self.ommatidia.T, k=k_neighbors+1)
         dists = dists[:, 1:]
@@ -775,6 +774,7 @@ class EyeStack(Stack):
             self.focus_stack(smooth, interpolate, use_all, layer_smooth)
             self.eye = Eye(self.stack.astype('uint8'))
         self.eye.crop_eye(padding)
+
         self.heights = self.heights[min(self.eye.cc):max(self.eye.cc),
                                     min(self.eye.rr):max(self.eye.rr)]
         self.stack = self.stack[min(self.eye.cc):max(self.eye.cc),
