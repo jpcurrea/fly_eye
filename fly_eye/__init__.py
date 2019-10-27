@@ -383,8 +383,11 @@ class Eye(Layer):
         if mask is None and self.mask is None:
             self.select_color(hue_only=hue_only)
             self.mask = self.cs.mask
+            self.mask = self.mask == 1
         elif mask is not None:
             self.mask = mask
+            assert mask.shape == self.image.shape, print(
+                "mask and image must have the same shape. Instead, mask.shape() = {self.mask.shape} and image.shape() = {self.image.shape}")
         if self.mask is not None:
             if self.mask.dtype == bool:
                 contour = skimage.measure.find_contours(
@@ -403,7 +406,10 @@ class Eye(Layer):
                 self.eye_contour = cont.reshape(
                     (cont.shape[0], cont.shape[-1]))
                 mask = np.zeros(self.mask.shape, int)
-                mask[self.eye_contour[:, 0], self.eye_contour[:, 1]] = 1
+                import pdb
+                pdb.set_trace()
+                # mask[self.eye_contour[:, 0], self.eye_contour[:, 1]] = 1
+                mask[self.eye_contour[:, 1], self.eye_contour[:, 0]] = 1
                 vert1 = np.cumsum(mask, axis=0)
                 vert2 = np.cumsum(mask[::-1], axis=1)[::-1]
                 self.eye_mask = (vert1 * vert2) > 0
@@ -544,7 +550,8 @@ class Eye(Layer):
             self.filtered_eye = self.filtered_eye.max() - self.filtered_eye,
 
         def lattice_std(dist, crop=crop):
-            arr = peak_local_max(self.filtered_eye, min_distance=dist)
+            arr = peak_local_max(self.filtered_eye, min_distance=dist,
+                                 exclude_border=False)
             ys, xs = arr.T
             if crop:
                 in_eye = self.mask[ys, xs] == 1
@@ -568,7 +575,7 @@ class Eye(Layer):
         max_dist = int(np.ceil(max(self.image.shape[:2])/np.sqrt(min_facets)))
         stds = []
         for num, dist in enumerate(range(min_dist, max_dist)[::-1]):
-            print(dist)
+            # print(dist)
             std, (xs, ys) = lattice_std(dist)
             stds += [std]
             # plt.scatter(xs, ys)
