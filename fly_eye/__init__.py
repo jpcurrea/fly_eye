@@ -780,8 +780,8 @@ class EyeStack(Stack):
                                     min(self.eye.rr):max(self.eye.rr)]
         self.stack = self.stack[min(self.eye.cc):max(self.eye.cc),
                                 min(self.eye.rr):max(self.eye.rr)]
-        self.mask = self.eye.cs.mask[min(self.eye.cc):max(self.eye.cc),
-                                     min(self.eye.rr):max(self.eye.rr)]
+        self.mask = self.eye.mask[min(self.eye.cc):max(self.eye.cc),
+                                  min(self.eye.rr):max(self.eye.rr)]
         self.eye.eye_contour[:, 0] -= min(self.eye.rr)
         self.eye.eye_contour[:, 1] -= min(self.eye.cc)
         # self.eye = Eye(self.eye.eye)
