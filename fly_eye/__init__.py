@@ -386,8 +386,9 @@ class Eye(Layer):
             self.mask = self.mask == 1
         elif mask is not None:
             self.mask = mask
-            assert mask.shape == self.image.shape, print(
-                "mask and image must have the same shape. Instead, mask.shape() = {self.mask.shape} and image.shape() = {self.image.shape}")
+            # assert mask.shape == self.image.shape, print(
+            #     "mask and image must have the same shape. Instead, mask.shape()"
+            #     " = {self.mask.shape} and image.shape() = {self.image.shape}")
         if self.mask is not None:
             if self.mask.dtype == bool:
                 if self.mask.mean() < 1:
