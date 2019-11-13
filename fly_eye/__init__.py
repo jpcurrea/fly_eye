@@ -767,13 +767,13 @@ class EyeStack(Stack):
         self.depth_size = depth_size
 
     def get_eye_stack(self, smooth=0, interpolate=True, use_all=False,
-                      layer_smooth=0, padding=1.1):
+                      layer_smooth=0, padding=1.1, mask=None):
         """Generate focus stack of images and then crop out the eye.
         """
         if self.eye is None:
             self.focus_stack(smooth, interpolate, use_all, layer_smooth)
             self.eye = Eye(self.stack.astype('uint8'))
-        self.eye.crop_eye(padding)
+        self.eye.crop_eye(padding, mask=mask)
 
         self.heights = self.heights[min(self.eye.cc):max(self.eye.cc),
                                     min(self.eye.rr):max(self.eye.rr)]
@@ -785,9 +785,9 @@ class EyeStack(Stack):
         self.eye.eye_contour[:, 1] -= min(self.eye.cc)
         # self.eye = Eye(self.eye.eye)
 
-    def get_3d_data(self, averaging_range=5, white_peak=True):
+    def get_3d_data(self, averaging_range=5, white_peak=True, mask=None):
         if self.stack is None:
-            self.get_eye_stack()
+            self.get_eye_stack(mask=mask)
         height, width = self.heights.shape
         xvals = np.linspace(0, (width - 1), width)
         yvals = np.linspace(0, (height - 1), height)
