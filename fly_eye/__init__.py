@@ -6,9 +6,8 @@ import numpy as np
 import subprocess
 import seaborn as sbn
 
-from matplotlib import colors
+from matplotlib import colors, mlab
 from matplotlib import pyplot as plt
-from matplotlib import mlab
 import skimage
 from skimage.draw import ellipse as Ellipse
 from skimage.feature import peak_local_max
@@ -18,9 +17,7 @@ from scipy import spatial, ndimage, stats, signal, interpolate, ndimage
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.measurements import center_of_mass
 
-import cv2
 from rolling_window import rolling_window
-from bird_call import Recording
 
 
 def rgb_2_gray(rgb):
@@ -151,18 +148,128 @@ def inside_angle(A, B, C):
     return np.degrees(np.arccos(angles))
 
 
-def fit_ellipse(x, y):
-    x = x[:, np.newaxis]
-    y = y[:, np.newaxis]
-    D = np.hstack((x*x, x*y, y*y, x, y, np.ones_like(x)))
-    S = np.dot(D.T, D)
-    C = np.zeros([6, 6])
-    C[0, 2] = C[2, 0] = 2
-    C[1, 1] = -1
-    E, V = eig(np.dot(inv(S), C))
-    n = np.argmax(np.abs(E))
-    a = V[:, n]
-    return a
+class LSqEllipse:
+
+    def fit(self, data):
+        """Lest Squares fitting algorithm 
+
+        Theory taken from (*)
+        Solving equation Sa=lCa. with a = |a b c d f g> and a1 = |a b c> 
+            a2 = |d f g>
+
+        Args
+        ----
+        data (list:list:float): list of two lists containing the x and y data of the
+            ellipse. of the form [[x1, x2, ..., xi],[y1, y2, ..., yi]]
+
+        Returns
+        ------
+        coef (list): list of the coefficients describing an ellipse
+           [a,b,c,d,f,g] corresponding to ax**2+2bxy+cy**2+2dx+2fy+g
+        """
+        x, y = np.asarray(data, dtype=float)
+
+        # Quadratic part of design matrix [eqn. 15] from (*)
+        D1 = np.mat(np.vstack([x**2, x*y, y**2])).T
+        # Linear part of design matrix [eqn. 16] from (*)
+        D2 = np.mat(np.vstack([x, y, np.ones(len(x))])).T
+
+        # forming scatter matrix [eqn. 17] from (*)
+        S1 = D1.T*D1
+        S2 = D1.T*D2
+        S3 = D2.T*D2
+
+        # Constraint matrix [eqn. 18]
+        C1 = np.mat('0. 0. 2.; 0. -1. 0.; 2. 0. 0.')
+
+        # Reduced scatter matrix [eqn. 29]
+        M = C1.I*(S1-S2*S3.I*S2.T)
+
+        # M*|a b c >=l|a b c >. Find eigenvalues and eigenvectors from this equation [eqn. 28]
+        eval, evec = np.linalg.eig(M)
+
+        # eigenvector must meet constraint 4ac - b^2 to be valid.
+        cond = 4*np.multiply(evec[0, :], evec[2, :]) - \
+            np.power(evec[1, :], 2)
+        a1 = evec[:, np.nonzero(cond.A > 0)[1]]
+
+        # |d f g> = -S3^(-1)*S2^(T)*|a b c> [eqn. 24]
+        a2 = -S3.I*S2.T*a1
+
+        # eigenvectors |a b c d f g>
+        self.coef = np.vstack([a1, a2])
+        self._save_parameters()
+
+    def _save_parameters(self):
+        """finds the important parameters of the fitted ellipse
+
+        Theory taken form http://mathworld.wolfram
+
+        Args
+        -----
+        coef (list): list of the coefficients describing an ellipse
+           [a,b,c,d,f,g] corresponding to ax**2+2bxy+cy**2+2dx+2fy+g
+
+        Returns
+        _______
+        center (List): of the form [x0, y0]
+        width (float): major axis 
+        height (float): minor axis
+        phi (float): rotation of major axis form the x-axis in radians 
+        """
+
+        # eigenvectors are the coefficients of an ellipse in general form
+        # a*x^2 + 2*b*x*y + c*y^2 + 2*d*x + 2*f*y + g = 0 [eqn. 15) from (**) or (***)
+        a = self.coef[0, 0]
+        b = self.coef[1, 0]/2.
+        c = self.coef[2, 0]
+        d = self.coef[3, 0]/2.
+        f = self.coef[4, 0]/2.
+        g = self.coef[5, 0]
+
+        # finding center of ellipse [eqn.19 and 20] from (**)
+        x0 = (c*d-b*f)/(b**2.-a*c)
+        y0 = (a*f-b*d)/(b**2.-a*c)
+
+        # Find the semi-axes lengths [eqn. 21 and 22] from (**)
+        numerator = 2*(a*f*f+c*d*d+g*b*b-2*b*d*f-a*c*g)
+        denominator1 = (b*b-a*c) * \
+            ((c-a)*np.sqrt(1+4*b*b/((a-c)*(a-c)))-(c+a))
+        denominator2 = (b*b-a*c) * \
+            ((a-c)*np.sqrt(1+4*b*b/((a-c)*(a-c)))-(c+a))
+        width = np.sqrt(numerator/denominator1)
+        height = np.sqrt(numerator/denominator2)
+
+        # angle of counterclockwise rotation of major-axis of ellipse to x-axis [eqn. 23] from (**)
+        # or [eqn. 26] from (***).
+        phi = .5*np.arctan((2.*b)/(a-c))
+
+        self._center = [x0, y0]
+        self._width = width
+        self._height = height
+        self._phi = phi
+
+    @property
+    def center(self):
+        return self._center
+
+    @property
+    def width(self):
+        return self._width
+
+    @property
+    def height(self):
+        return self._height
+
+    @property
+    def phi(self):
+        """angle of counterclockwise rotation of major-axis of ellipse to x-axis 
+        [eqn. 23] from (**)
+        """
+        return self._phi
+
+    def parameters(self):
+        return self.center, self.width, self.height, self.phi
 
 
 def ellipse_center(a):
@@ -369,100 +476,99 @@ class Eye(Layer):
 
     """A class specifically used for processing images of fly eyes. Maybe
     could be modified for other eyes (square lattice, for instance)
+
+    Input mask should be either a boolean array where True => points included in the 
+    eye or a filename pointing to such an array.
     """
 
-    def __init__(self, filename, bw=False, pixel_size=1):
+    def __init__(self, filename, bw=False, pixel_size=1,
+                 mask_fn="mask.jpg", mask=None):
         Layer.__init__(self, filename, bw)
         self.eye_contour = None
         self.ellipse = None
         self.ommatidia = None
         self.pixel_size = pixel_size
-        self.mask = None
+        self.mask_fn = mask_fn
+        self.mask = mask
+        self.load_image()
+        if self.mask is None and os.path.exists(self.mask_fn):
+            layer = Layer(self.mask_fn, bw=True)
+            self.mask = layer.load_image()
+        if self.mask is not None and self.mask.dtype is not np.dtype('bool'):
+            self.mask = self.mask == self.mask.max()
+        if self.mask is not None:
+            if self.mask.dtype is not np.dtype('bool'):
+                self.mask = self.mask == self.mask.max()
+            assert self.mask.shape == self.image.shape[:2], print(
+                "input mask should have the same shape as input image")
+            assert self.mask.mean() < 1 and self.mask.mean() > 0, print(
+                "input mask should not be a uniform image")
 
-    def get_eye_outline(self, mask=None, hue_only=False):
-        if mask is None and self.mask is None:
+    def get_eye_outline(self, hue_only=False, save=True):
+        if self.mask is None:
             self.select_color(hue_only=hue_only)
             self.mask = self.cs.mask
             self.mask = self.mask == 1
-        elif mask is not None:
-            self.mask = mask
-            # assert mask.shape == self.image.shape, print(
-            #     "mask and image must have the same shape. Instead, mask.shape()"
-            #     " = {self.mask.shape} and image.shape() = {self.image.shape}")
-        if self.mask is not None:
-            if self.mask.dtype == bool:
-                if self.mask.mean() < 1:
-                    contour = skimage.measure.find_contours(
-                        (255/self.mask.max()) * self.mask.astype(int), 256/2)
-                    contour = np.concatenate(contour)
-                    self.eye_contour = np.round(contour).astype(int)
-                    self.conts = contour
-                    self.eye_mask = self.mask
-            else:
-                conts, h = cv2.findContours(
-                    mask,
-                    cv2.RETR_TREE,
-                    cv2.CHAIN_APPROX_NONE)
-                cont = max(conts, key=cv2.contourArea)
-                self.cont = cont
-                self.eye_contour = cont.reshape(
-                    (cont.shape[0], cont.shape[-1]))
-                mask = np.zeros(self.mask.shape, int)
-                # mask[self.eye_contour[:, 0], self.eye_contour[:, 1]] = 1
-                mask[self.eye_contour[:, 1], self.eye_contour[:, 0]] = 1
-                vert1 = np.cumsum(mask, axis=0)
-                vert2 = np.cumsum(mask[::-1], axis=1)[::-1]
-                self.eye_mask = (vert1 * vert2) > 0
+            if save:
+                img = PIL.Image.fromarray(self.mask)
+                img.save(self.mask_fn)
+        contour = skimage.measure.find_contours(
+            (255/self.mask.max()) * self.mask.astype(int), 256/2)
+        contour = max(contour, key=len).astype(int)
+        new_mask = np.zeros(self.mask.shape, dtype=int)
+        new_mask[contour[:, 0], contour[:, 1]] = 1
+        ndimage.binary_fill_holes(new_mask, output=new_mask)
+        new_mask = signal.medfilt2d(new_mask.astype('uint8'), 11).astype(bool)
+        self.eye_contour = np.round(contour).astype(int)
+        self.conts = contour
+        self.eye_mask = new_mask
 
-    def get_eye_sizes(self, disp=False, mask=None, hue_only=False):
+    def get_eye_sizes(self, disp=False, hue_only=False):
         if self.eye_contour is None:
-            self.get_eye_outline(mask=mask, hue_only=hue_only)
-        self.ellipse = cv2.fitEllipse(self.eye_contour)
-        self.eye_length = self.pixel_size*max(self.ellipse[1])
-        self.eye_width = self.pixel_size*min(self.ellipse[1])
-        self.eye_area = self.pixel_size**2*cv2.contourArea(self.eye_contour)
+            self.get_eye_outline(hue_only=hue_only)
+        least_sqr_ellipse = LSqEllipse()
+        least_sqr_ellipse.fit(self.eye_contour.T)
+        self.ellipse = least_sqr_ellipse
+        center, width, height, phi = self.ellipse.parameters()
+        self.eye_length = 2 * self.pixel_size*max(width, height)
+        self.eye_width = 2 * self.pixel_size*min(width, height)
+        self.eye_area = np.pi * self.eye_length / 2 * self.eye_width / 2
         if disp:
             plt.imshow(self.image)
             plt.plot(self.eye_contour[:, 0], self.eye_contour[:, 1])
             plt.show()
 
-    def crop_eye(self, padding=1.05, mask=None, hue_only=False):
+    def crop_eye(self, padding=1.05, hue_only=False):
         if self.image is None:
             self.load_image()
         if self.ellipse is None:
-            self.get_eye_sizes(mask=mask, hue_only=hue_only)
-        (x, y), (w, h), ang = self.ellipse
+            self.get_eye_sizes(hue_only=hue_only)
+        # (x, y), (w, h), ang = self.ellipse
+        (x, y), width, height, ang = self.ellipse.parameters()
         self.angle = ang
-        w = padding*w
-        h = padding*h
-        self.cc, self.rr = Ellipse(x, y, w/2., h/2.,
+        w = padding*width
+        h = padding*height
+        self.cc, self.rr = Ellipse(x, y, w, h,
                                    shape=self.image.shape[:2][::-1],
-                                   rotation=np.deg2rad(ang))
+                                   rotation=ang)
         out = np.copy(self.image)
-        # out = np.zeros(self.image.shape, dtype='uint8')
-        # out[self.cc, self.rr] = self.image[self.cc, self.rr]
-        # self.eye = out
-        self.eye = Eye(out[min(self.cc):max(self.cc),
-                           min(self.rr):max(self.rr)])
-        self.eye.mask = self.mask[min(self.cc):max(
+        new_mask = self.mask[min(self.cc):max(
             self.cc), min(self.rr):max(self.rr)]
+        self.eye = Eye(out[min(self.cc):max(self.cc),
+                           min(self.rr):max(self.rr)],
+                       mask=new_mask)
         return self.eye
 
-    def get_ommatidia(self, mask=None, white_peak=True,
-                      min_facets=500, max_facets=50000,
+    def get_ommatidia(self, white_peak=True, min_facets=500, max_facets=50000,
                       crop=True):
         if self.image is None:
             self.load_image()
         if self.bw is False:
-            # eye_sats = colors.rgb_to_hsv(self.image.astype('uint8'))[:, :, -1]
             eye_sats = rgb_2_gray(self.image.astype('uint8'))
         else:
             eye_sats = self.image.astype('uint8')
         if self.eye_contour is None and crop:
-            self.get_eye_sizes(disp=False, mask=mask)
-        # eye_sats[self.eye_mask == False] = eye_sats[self.eye_mask].mean()
-
-        # eye_sats -= eye_sats.mean()
+            self.get_eye_sizes(disp=False)
         eye_fft = np.fft.fft2(eye_sats)
         eye_fft_shifted = np.fft.fftshift(eye_fft)
 
@@ -490,33 +596,16 @@ class Eye(Layer):
         peaks = np.array(peaks)
         self.peaks = peaks
         fs = np.arange(len(peaks)) + 1
-        # optimum = peak_local_max(fs*peaks, num_peaks=10, min_distance=10)  # second highest maximum
-        # optimum = np.squeeze(
-        #     peak_local_max(fs*peaks, num_peaks=10, min_distance=10))  # second highest maximum
-        min_fs = min(fs[fs > np.sqrt(min_facets)]) / 2
-        max_fs = max(fs[fs < np.sqrt(max_facets)]) * 2
+        min_fs = min(fs[fs > np.sqrt(min_facets)])
+        max_fs = max(fs[fs < max_facets / 10])
         i = np.logical_and(
             fs >= min_fs,
             fs <= max_fs)
-        # optimum = np.squeeze(
-        #     peak_local_max((fs*peaks)[i], num_peaks=1, exclude_border=True))
         optimum = np.argmax((fs*peaks)[i])
         optimum = fs[i][optimum]
-
-        # lower_bound = peak_local_max(peaks.max() - peaks[:optimum],
-        #                              num_peaks=1)
-        # minima = peak_local_max(peaks.max() - peaks[optimum:],
-        #                         min_distance=10)
-        # upper_bound = 2 * optimum - lower_bound
+        self.fundamental_frequency = optimum
         upper_bound = 1.5 * optimum
         self.upper_bound = upper_bound
-
-        # std = (upper_bound - lower_bound)/4  #
-        # std = .1 * optimum
-        # weights = gaussian(dists_2d, optimum, std)
-        # in_range = np.logical_and(
-        #     dists_2d > optimum - 2*std,
-        #     dists_2d < optimum + 2*std)
         in_range = dists_2d < upper_bound
         weights = np.ones(dists_2d.shape)
         weights[in_range == False] = 0
@@ -535,24 +624,14 @@ class Eye(Layer):
         if crop:
             self.centers[self.mask] = self.filtered_eye[self.mask]
 
-        # filtered_eye = selection.real
-        # centers = np.zeros(selection.shape)
-        # centers[eye.eye_mask] = filtered_eye[eye.eye_mask]
-
         # use optimization function for find min_distance that minimizes
         # the variance distances between centers and their nearest neighbors
         d = int(np.round(max(self.image.shape) / 150.))
-        # if white_peak:
-        #     ys, xs = peak_local_max(self.filtered_eye, min_distance=d).T
-        # else:
-        #     ys, xs = peak_local_max(
-        #         self.filtered_eye.max() - self.filtered_eye,
-        #         min_distance=d).T
         if not white_peak:
             self.filtered_eye = self.filtered_eye.max() - self.filtered_eye
 
-        def lattice_std(dist, crop=crop):
-            arr = peak_local_max(self.filtered_eye, min_distance=dist,
+        def lattice_std(dist, filtered_eye=self.filtered_eye, crop=crop):
+            arr = peak_local_max(filtered_eye, min_distance=dist,
                                  exclude_border=False)
             ys, xs = arr.T
             if crop:
@@ -563,7 +642,7 @@ class Eye(Layer):
                 tree = spatial.KDTree(arr)
                 dists, inds = tree.query(arr, k=2)
                 dists = dists[:, 1]
-                std = dists.std()
+                std = dists.std()/np.sqrt(len(xs))
             else:
                 std = 0
             return std, (xs, ys)
@@ -574,15 +653,13 @@ class Eye(Layer):
         old_xs, old_ys = [], []
         # min_dist = int(np.floor(min(self.image.shape[:2])/np.sqrt(max_facets)))
         min_dist = 1
-        max_dist = int(np.ceil(max(self.image.shape[:2])/np.sqrt(min_facets)))
+        max_dist = int(np.ceil(max(self.image.shape[:2])/(min_facets/10)))
         stds = []
         for num, dist in enumerate(range(min_dist, max_dist)[::-1]):
             # print(dist)
             std, (xs, ys) = lattice_std(dist)
             stds += [std]
-            # plt.scatter(xs, ys)
-            # plt.show()
-            if std > 0 and std < old_std:
+            if std > 0 and std < old_std and len(xs) >= min_facets and len(xs) <= max_facets:
                 old_std = std
                 old_xs, old_ys = xs, ys
 
@@ -590,9 +667,10 @@ class Eye(Layer):
             [self.pixel_size*old_xs, self.pixel_size*old_ys])
 
     def get_ommatidial_diameter(self, k_neighbors=7, radius=100,
-                                mask=None, white_peak=True):
+                                white_peak=True, min_facets=500, max_facets=50000):
         if self.ommatidia is None:
-            self.get_ommatidia(mask=mask, white_peak=white_peak)
+            self.get_ommatidia(white_peak=white_peak, min_facets=min_facets,
+                               max_facets=max_facets)
         self.tree = spatial.KDTree(self.ommatidia.T)
         dists, inds = self.tree.query(self.ommatidia.T, k=k_neighbors+1)
         dists = dists[:, 1:]
@@ -607,10 +685,12 @@ class Eye(Layer):
         dists[too_large] = np.nan
         self.ommatidial_dists = np.nanmean(dists, axis=1)
 
-        (x, y), (w, h), ang = self.ellipse
+        (x, y), w, h, ang = self.ellipse.parameters()
         x, y, radius = self.pixel_size * x, self.pixel_size * y, self.pixel_size * radius
         near_center = self.tree.query_ball_point([x, y], r=radius)
 
+        import pdb
+        pdb.set_trace()
         self.ommatidial_diameter = self.ommatidial_dists[near_center].mean()
         self.ommatidial_diameter_SD = self.ommatidial_dists[near_center].std()
 
@@ -761,34 +841,39 @@ class EyeStack(Stack):
     """
 
     def __init__(self, dirname, f_type=".jpg", bw=False,
-                 pixel_size=1, depth_size=1):
+                 pixel_size=1, depth_size=1, mask_fn='mask.jpg',
+                 mask=None):
         Stack.__init__(self, dirname, f_type, bw)
         self.eye = None
         self.pixel_size = pixel_size
         self.depth_size = depth_size
+        self.eye_mask_fn = mask_fn
+        self.eye_mask = mask
 
     def get_eye_stack(self, smooth=0, interpolate=True, use_all=False,
-                      layer_smooth=0, padding=1.1, mask=None):
+                      layer_smooth=0, padding=1.1):
         """Generate focus stack of images and then crop out the eye.
         """
         if self.eye is None:
             self.focus_stack(smooth, interpolate, use_all, layer_smooth)
-            self.eye = Eye(self.stack.astype('uint8'))
-        self.eye.crop_eye(padding, mask=mask)
-
+            self.eye = Eye(self.stack.astype('uint8'),
+                           mask_fn=self.eye_mask_fn, mask=self.eye_mask,
+                           pixel_size=self.pixel_size)
+        self.eye.crop_eye(padding)
         self.heights = self.heights[min(self.eye.cc):max(self.eye.cc),
                                     min(self.eye.rr):max(self.eye.rr)]
         self.stack = self.stack[min(self.eye.cc):max(self.eye.cc),
                                 min(self.eye.rr):max(self.eye.rr)]
         self.mask = self.eye.mask[min(self.eye.cc):max(self.eye.cc),
                                   min(self.eye.rr):max(self.eye.rr)]
-        self.eye.eye_contour[:, 0] -= min(self.eye.rr)
-        self.eye.eye_contour[:, 1] -= min(self.eye.cc)
+        self.eye_contour = self.eye.eye_contour
+        self.eye_contour[:, 0] -= min(self.eye.cc)
+        self.eye_contour[:, 1] -= min(self.eye.rr)
         # self.eye = Eye(self.eye.eye)
 
-    def get_3d_data(self, averaging_range=5, white_peak=True, mask=None):
+    def get_3d_data(self, averaging_range=5, white_peak=True, min_facets=500, max_facets=5000):
         if self.stack is None:
-            self.get_eye_stack(mask=mask)
+            self.get_eye_stack()
         height, width = self.heights.shape
         xvals = np.linspace(0, (width - 1), width)
         yvals = np.linspace(0, (height - 1), height)
@@ -809,40 +894,27 @@ class EyeStack(Stack):
         self.eye_3d_colors = np.array(
             [r.flatten(), g.flatten(), b.flatten()])
 
-        xs, ys, zs = self.eye_3d_masked
+        ys, xs, zs = self.eye_3d_masked
         self.radius, self.center = sphereFit(xs, ys, zs)
-        self.eye_3d -= np.repeat(
-            self.center, self.eye_3d.shape[1]).reshape(self.eye_3d.shape)
-
+        self.eye_3d -= self.center[:, np.newaxis]
         # rotate points until center of mass is only on the x axis
         # this centers the eye in polar coordinates, minimizing distortion due to the projection
         # also, rotate the eye contour by the same rotation
         # 1. find center of mass
         com = self.eye_3d.mean(1)
-        # xs, ys = self.eye.eye_contour.T
-        # zs = self.heights[xs, ys].
-        # outline = np.array([self.pixel_size * xs.flatten(),
-        #                     self.pixel_size * ys.flatten(),
-        #                     self.depth_size * zs.flatten()])
         # 2. rotate com along x (com[0]) axis until z (com[2]) = 0
         ang1 = np.arctan2(com[2], com[1])
         com1 = rotate(com, ang1, axis=0)
         rot1 = rotate(self.eye_3d.T, ang1, axis=0)
-        # outline1 = rotate(outline.T, ang1, axis=0)
         # 3. rotate com along z (com[2]) axis until y (com[1])= 0
         ang2 = np.arctan2(com1[1], com1[0])
         com2 = rotate(com1, ang2, axis=2)
         rot2 = rotate(rot1.T, ang2, axis=2)
-        # outline2 = rotate(outline1.T, ang2, axis=0)
         # 4. convert to spherical coordinates now that they are centered
         xs, ys, zs = rot2
         self.inclination, self.azimuth, self.radii = cartesian_to_spherical(
             xs, ys, zs)
         self.polar = np.array([self.inclination, self.azimuth, self.radii])
-        # outline_inclination, outline_azimuth, outline_radii = cartesian_to_spherical(
-        #     outline2[0], outline[1], outline[2])
-        # self.polar_eye_outline = np.array([outline_inclination, outline_azimuth, outline_radii])
-
         # using polar coordinates, 'flatten' the image of the eye
         # 1. create a grid for sampling the polar data
         # use a resultion that is high enough for the smallest range
@@ -890,10 +962,12 @@ class EyeStack(Stack):
         # self.flat_eye = np.array([r_grid_nearest, g_grid_nearest, b_grid_nearest]).transpose((1, 2, 0))
         self.flat_eye = np.array([r_grid, g_grid, b_grid]).transpose((1, 2, 0))
         self.flat_eye = Eye(
-            self.flat_eye, pixel_size=self.polar_grid_resolution)
+            self.flat_eye, pixel_size=self.polar_grid_resolution,
+            mask_fn=self.eye_mask_fn.replace("mask", "flat_eye_mask"))
 
         # in polar coordinates, distances correspond to angles in cartesian space
-        self.flat_eye.get_ommatidial_diameter(white_peak=white_peak)
+        self.flat_eye.get_ommatidial_diameter(white_peak=white_peak,
+                                              min_facets=min_facets, max_facets=max_facets)
         # interommatidial_ange in degrees
         self.interommatidial_angle = self.flat_eye.ommatidial_diameter * 180. / np.pi
         # ommatidial diameter in mm
@@ -953,7 +1027,6 @@ class Video(Stack):
                      "-ar", "44100",
                      "-ab", "128",
                      "-vn", audio_fname])
-                self.audio = Recording(audio_fname, trim=False)
             except subprocess.CalledProcessError:
                 print("failed to get audio from video!")
 
@@ -1074,6 +1147,7 @@ class ColorSelector():
         if isinstance(frame, str):
             frame = ndimage.imread(frame)
         self.frame = frame
+        self.mask = np.ones(self.frame.shape[:2])
         self.colors = np.array([[0, 0, 0], [1, 1, 255]])
         self.fig = plt.figure(figsize=(8, 8), num="Color Selector")
         self.hue_only = hue_only
@@ -1174,8 +1248,6 @@ class ColorSelector():
                 self.mask = hues
             else:
                 self.mask = np.logical_and(hues, sats, vals)
-        # cv2.inRange(hsv, np.array(colors[0]), np.array(colors[1]))
-        # mask = cv2.erode(mask, None, iterations=2)
         self.mask = ndimage.morphology.binary_dilation(
             self.mask,
             iterations=dilate).astype("uint8")
