@@ -689,8 +689,6 @@ class Eye(Layer):
         x, y, radius = self.pixel_size * x, self.pixel_size * y, self.pixel_size * radius
         near_center = self.tree.query_ball_point([x, y], r=radius)
 
-        import pdb
-        pdb.set_trace()
         self.ommatidial_diameter = self.ommatidial_dists[near_center].mean()
         self.ommatidial_diameter_SD = self.ommatidial_dists[near_center].std()
 
