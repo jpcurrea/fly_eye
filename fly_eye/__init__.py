@@ -969,8 +969,15 @@ class EyeStack(Stack):
         # interommatidial_ange in degrees
         self.interommatidial_angle = self.flat_eye.ommatidial_diameter * 180. / np.pi
         # ommatidial diameter in mm
-        self.ommatidial_diameter = 2 * self.radius * \
-            np.sin(self.flat_eye.ommatidial_diameter)
+        self.ommatidial_diameter = self.radius * self.flat_eye.ommatidial_diameter
+        # ommatidial diameter, io angle, and ommatidial counts can be approximated
+        # from the projected image as well. these will be treated as approximations
+        self.eye.eye.get_ommatidial_diameter(white_peak=white_peak,
+                                             min_facets=min_facets, max_facets=max_facets)
+        self.ommatidial_diameter_approx = self.eye.eye.ommatidial_diameter
+        self.ommatidial_count_approx = len(self.eye.eye.ommatidia[0])
+        self.interommatidial_angle_approx = 2 * np.arcsin(
+            self.ommatidial_count_approx/(2 * self.radius))
 
         # vertical field of view using the major axis of the flat eye, in degrees
         self.fov_vertical = self.flat_eye.eye_length * 180. / np.pi
