@@ -977,8 +977,11 @@ class EyeStack(Stack):
                                              min_facets=min_facets, max_facets=max_facets)
         self.ommatidial_diameter_approx = self.eye.eye.ommatidial_diameter
         self.ommatidial_count_approx = len(self.eye.eye.ommatidia[0])
-        self.interommatidial_angle_approx = 2 * np.arcsin(
-            self.ommatidial_diameter_approx/(2 * self.radius))
+        if self.radius > self.ommatidial_diameter_approx:
+            self.interommatidial_angle_approx = 2 * np.arcsin(
+                self.ommatidial_diameter_approx/(2 * self.radius))
+        else:
+            self.interommatidial_angle_approx = np.nan
 
         # vertical field of view using the major axis of the flat eye, in degrees
         self.fov_vertical = self.flat_eye.eye_length * 180. / np.pi
