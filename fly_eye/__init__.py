@@ -491,9 +491,10 @@ class Eye(Layer):
         self.mask_fn = mask_fn
         self.mask = mask
         self.load_image()
-        if self.mask is None and os.path.exists(self.mask_fn):
-            layer = Layer(self.mask_fn, bw=True)
-            self.mask = layer.load_image()
+        if self.mask is None and self.mask_fn is not None:
+            if os.path.exists(self.mask_fn):
+                layer = Layer(self.mask_fn, bw=True)
+                self.mask = layer.load_image()
         if self.mask is not None and self.mask.dtype is not np.dtype('bool'):
             self.mask = self.mask == self.mask.max()
         if self.mask is not None:
