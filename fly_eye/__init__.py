@@ -979,7 +979,7 @@ class EyeStack(Stack):
         self.ommatidial_count_approx = len(self.eye.eye.ommatidia[0])
         if self.radius > self.ommatidial_diameter_approx:
             self.interommatidial_angle_approx = 2 * np.arcsin(
-                self.ommatidial_diameter_approx/(2 * self.radius))
+                self.ommatidial_diameter_approx/(2 * self.radius)) * 180 / np.pi
         else:
             self.interommatidial_angle_approx = np.nan
 
