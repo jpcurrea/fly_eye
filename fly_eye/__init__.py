@@ -665,34 +665,40 @@ class Eye(Layer):
                 old_std = std
                 old_xs, old_ys = xs, ys
 
-        self.ommatidia = np.array(
-            [self.pixel_size*old_xs, self.pixel_size*old_ys])
+        import pdb
+        pdb.set_trace()
+        if len(old_xs) > 0:
+            self.ommatidia = np.array(
+                [self.pixel_size*old_xs, self.pixel_size*old_ys])
+        else:
+            self.ommatidia = None
 
     def get_ommatidial_diameter(self, k_neighbors=7, radius=100,
                                 white_peak=True, min_facets=500, max_facets=50000):
         if self.ommatidia is None:
             self.get_ommatidia(white_peak=white_peak, min_facets=min_facets,
                                max_facets=max_facets)
-        self.tree = spatial.KDTree(self.ommatidia.T)
-        dists, inds = self.tree.query(self.ommatidia.T, k=k_neighbors+1)
-        dists = dists[:, 1:]
-        meds = np.repeat(np.median(dists, axis=1),
-                         k_neighbors).reshape(dists.shape)
-        too_small = dists < .2*meds
-        dists[too_small] = np.nan
-        mins = np.repeat(np.nanmin(dists, axis=1),
-                         k_neighbors).reshape(dists.shape)
-        magn = dists / mins
-        too_large = magn > 1.75
-        dists[too_large] = np.nan
-        self.ommatidial_dists = np.nanmean(dists, axis=1)
+        if self.ommatidia is not None:
+            self.tree = spatial.KDTree(self.ommatidia.T)
+            dists, inds = self.tree.query(self.ommatidia.T, k=k_neighbors+1)
+            dists = dists[:, 1:]
+            meds = np.repeat(np.median(dists, axis=1),
+                             k_neighbors).reshape(dists.shape)
+            too_small = dists < .2*meds
+            dists[too_small] = np.nan
+            mins = np.repeat(np.nanmin(dists, axis=1),
+                             k_neighbors).reshape(dists.shape)
+            magn = dists / mins
+            too_large = magn > 1.75
+            dists[too_large] = np.nan
+            self.ommatidial_dists = np.nanmean(dists, axis=1)
 
-        (x, y), w, h, ang = self.ellipse.parameters()
-        x, y, radius = self.pixel_size * x, self.pixel_size * y, self.pixel_size * radius
-        near_center = self.tree.query_ball_point([x, y], r=radius)
+            (x, y), w, h, ang = self.ellipse.parameters()
+            x, y, radius = self.pixel_size * x, self.pixel_size * y, self.pixel_size * radius
+            near_center = self.tree.query_ball_point([x, y], r=radius)
 
-        self.ommatidial_diameter = self.ommatidial_dists[near_center].mean()
-        self.ommatidial_diameter_SD = self.ommatidial_dists[near_center].std()
+            self.ommatidial_diameter = self.ommatidial_dists[near_center].mean()
+            self.ommatidial_diameter_SD = self.ommatidial_dists[near_center].std()
 
     def save(self, fn):
         """Save using pickle."""
@@ -968,29 +974,30 @@ class EyeStack(Stack):
         # in polar coordinates, distances correspond to angles in cartesian space
         self.flat_eye.get_ommatidial_diameter(white_peak=white_peak,
                                               min_facets=min_facets, max_facets=max_facets)
-        # interommatidial_ange in degrees
-        self.interommatidial_angle = self.flat_eye.ommatidial_diameter * 180. / np.pi
-        # ommatidial diameter in mm
-        self.ommatidial_diameter = self.radius * self.flat_eye.ommatidial_diameter
-        # ommatidial diameter, io angle, and ommatidial counts can be approximated
-        # from the projected image as well. these will be treated as approximations
-        self.eye.eye.get_ommatidial_diameter(white_peak=white_peak,
-                                             min_facets=min_facets, max_facets=max_facets)
-        self.ommatidial_diameter_approx = self.eye.eye.ommatidial_diameter
-        self.ommatidial_count_approx = len(self.eye.eye.ommatidia[0])
-        if self.radius > self.ommatidial_diameter_approx:
-            self.interommatidial_angle_approx = 2 * np.arcsin(
-                self.ommatidial_diameter_approx/(2 * self.radius)) * 180 / np.pi
-        else:
-            self.interommatidial_angle_approx = np.nan
+        if self.flat_eye.ommatidia is not None:
+            # interommatidial_ange in degrees
+            self.interommatidial_angle = self.flat_eye.ommatidial_diameter * 180. / np.pi
+            # ommatidial diameter in mm
+            self.ommatidial_diameter = self.radius * self.flat_eye.ommatidial_diameter
+            # ommatidial diameter, io angle, and ommatidial counts can be approximated
+            # from the projected image as well. these will be treated as approximations
+            self.eye.eye.get_ommatidial_diameter(white_peak=white_peak,
+                                                 min_facets=min_facets, max_facets=max_facets)
+            self.ommatidial_diameter_approx = self.eye.eye.ommatidial_diameter
+            self.ommatidial_count_approx = len(self.eye.eye.ommatidia[0])
+            if self.radius > self.ommatidial_diameter_approx:
+                self.interommatidial_angle_approx = 2 * np.arcsin(
+                    self.ommatidial_diameter_approx/(2 * self.radius)) * 180 / np.pi
+            else:
+                self.interommatidial_angle_approx = np.nan
 
-        # vertical field of view using the major axis of the flat eye, in degrees
-        self.fov_vertical = self.flat_eye.eye_length * 180. / np.pi
-        # horizontal field of view using the minor axis of the flat eye, in degrees
-        self.fov_horizontal = self.flat_eye.eye_width * 180. / np.pi
-        # field of view approximating the area as an ellipse, in steradians
-        self.fov = np.pi * (self.flat_eye.eye_width / 2) * \
-            (self.flat_eye.eye_length / 2)
+            # vertical field of view using the major axis of the flat eye, in degrees
+            self.fov_vertical = self.flat_eye.eye_length * 180. / np.pi
+            # horizontal field of view using the minor axis of the flat eye, in degrees
+            self.fov_horizontal = self.flat_eye.eye_width * 180. / np.pi
+            # field of view approximating the area as an ellipse, in steradians
+            self.fov = np.pi * (self.flat_eye.eye_width / 2) * \
+                (self.flat_eye.eye_length / 2)
 
 
 class Video(Stack):
