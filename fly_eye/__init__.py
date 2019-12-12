@@ -515,51 +515,58 @@ class Eye(Layer):
                 img.save(self.mask_fn)
         contour = skimage.measure.find_contours(
             (255/self.mask.max()) * self.mask.astype(int), 256/2)
-        contour = max(contour, key=len).astype(int)
-        new_mask = np.zeros(self.mask.shape, dtype=int)
-        new_mask[contour[:, 0], contour[:, 1]] = 1
-        ndimage.binary_fill_holes(new_mask, output=new_mask)
-        new_mask = signal.medfilt2d(new_mask.astype('uint8'), 11).astype(bool)
-        self.eye_contour = np.round(contour).astype(int)
-        self.conts = contour
-        self.eye_mask = new_mask
+        if len(contour) > 0:
+            contour = max(contour, key=len).astype(int)
+            new_mask = np.zeros(self.mask.shape, dtype=int)
+            new_mask[contour[:, 0], contour[:, 1]] = 1
+            ndimage.binary_fill_holes(new_mask, output=new_mask)
+            new_mask = signal.medfilt2d(new_mask.astype('uint8'), 11).astype(bool)
+            self.eye_contour = np.round(contour).astype(int)
+            self.conts = contour
+            self.eye_mask = new_mask
+        else:
+            self.eye_contour = None
+            self.conts = None
+            self.eye_mask = None
 
     def get_eye_sizes(self, disp=False, hue_only=False):
         if self.eye_contour is None:
             self.get_eye_outline(hue_only=hue_only)
-        least_sqr_ellipse = LSqEllipse()
-        least_sqr_ellipse.fit(self.eye_contour.T)
-        self.ellipse = least_sqr_ellipse
-        center, width, height, phi = self.ellipse.parameters()
-        self.eye_length = 2 * self.pixel_size*max(width, height)
-        self.eye_width = 2 * self.pixel_size*min(width, height)
-        self.eye_area = np.pi * self.eye_length / 2 * self.eye_width / 2
-        if disp:
-            plt.imshow(self.image)
-            plt.plot(self.eye_contour[:, 0], self.eye_contour[:, 1])
-            plt.show()
+        if self.eye_contour is not None:
+            least_sqr_ellipse = LSqEllipse()
+            least_sqr_ellipse.fit(self.eye_contour.T)
+            self.ellipse = least_sqr_ellipse
+            center, width, height, phi = self.ellipse.parameters()
+            self.eye_length = 2 * self.pixel_size*max(width, height)
+            self.eye_width = 2 * self.pixel_size*min(width, height)
+            self.eye_area = np.pi * self.eye_length / 2 * self.eye_width / 2
+            if disp:
+                plt.imshow(self.image)
+                plt.plot(self.eye_contour[:, 0], self.eye_contour[:, 1])
+                plt.show()
 
     def crop_eye(self, padding=1.05, hue_only=False):
         if self.image is None:
             self.load_image()
         if self.ellipse is None:
             self.get_eye_sizes(hue_only=hue_only)
-        # (x, y), (w, h), ang = self.ellipse
-        (x, y), width, height, ang = self.ellipse.parameters()
-        self.angle = ang
-        w = padding*width
-        h = padding*height
-        self.cc, self.rr = Ellipse(x, y, w, h,
-                                   shape=self.image.shape[:2][::-1],
-                                   rotation=ang)
-        out = np.copy(self.image)
-        new_mask = self.mask[min(self.cc):max(
-            self.cc), min(self.rr):max(self.rr)]
-        self.eye = Eye(out[min(self.cc):max(self.cc),
-                           min(self.rr):max(self.rr)],
-                       mask=new_mask,
-                       pixel_size=self.pixel_size)
-        return self.eye
+        if self.ellipse is not None:
+            # (x, y), (w, h), ang = self.ellipse
+            (x, y), width, height, ang = self.ellipse.parameters()
+            self.angle = ang
+            w = padding*width
+            h = padding*height
+            self.cc, self.rr = Ellipse(x, y, w, h,
+                                       shape=self.image.shape[:2][::-1],
+                                       rotation=ang)
+            out = np.copy(self.image)
+            new_mask = self.mask[min(self.cc):max(
+                self.cc), min(self.rr):max(self.rr)]
+            self.eye = Eye(out[min(self.cc):max(self.cc),
+                               min(self.rr):max(self.rr)],
+                           mask=new_mask,
+                           pixel_size=self.pixel_size)
+            return self.eye
 
     def get_ommatidia(self, white_peak=True, min_facets=500, max_facets=50000,
                       crop=True):
@@ -571,107 +578,106 @@ class Eye(Layer):
             eye_sats = self.image.astype('uint8')
         if self.eye_contour is None and crop:
             self.get_eye_sizes(disp=False)
-        eye_fft = np.fft.fft2(eye_sats)
-        eye_fft_shifted = np.fft.fftshift(eye_fft)
+        if self.eye_contour is not None:
+            eye_fft = np.fft.fft2(eye_sats)
+            eye_fft_shifted = np.fft.fftshift(eye_fft)
 
-        xinds, yinds = np.meshgrid(
-            range(eye_fft.shape[1]), range(eye_fft.shape[0]))
-        ycenter, xcenter = np.array(eye_fft.shape)/2
+            xinds, yinds = np.meshgrid(
+                range(eye_fft.shape[1]), range(eye_fft.shape[0]))
+            ycenter, xcenter = np.array(eye_fft.shape)/2
 
-        xdiffs, ydiffs = xinds - xcenter, yinds - ycenter
-        dists_2d = np.sqrt(xdiffs**2 + ydiffs**2)
-        self.dists_2d = dists_2d
-        self.angs_2d = np.arctan2(yinds - ycenter, xinds - xcenter)
-        i = self.angs_2d < 0
-        self.angs_2d[i] = self.angs_2d[i] + np.pi
+            xdiffs, ydiffs = xinds - xcenter, yinds - ycenter
+            dists_2d = np.sqrt(xdiffs**2 + ydiffs**2)
+            self.dists_2d = dists_2d
+            self.angs_2d = np.arctan2(yinds - ycenter, xinds - xcenter)
+            i = self.angs_2d < 0
+            self.angs_2d[i] = self.angs_2d[i] + np.pi
 
-        # measure 2d power spectrum as a function of radial distance from center
-        # using rolling maxima function to find the bounds of the fundamental spatial frequency
-        peaks = []
-        window_size = 3
-        for dist in np.arange(int(dists_2d.max()) - window_size):
+            # measure 2d power spectrum as a function of radial distance from center
+            # using rolling maxima function to find the bounds of the fundamental spatial frequency
+            peaks = []
+            window_size = 3
+            for dist in np.arange(int(dists_2d.max()) - window_size):
+                i = np.logical_and(
+                    dists_2d.flatten() >= dist, dists_2d.flatten() < dist + window_size)
+                peaks += [abs(eye_fft_shifted.flatten()[i]).mean()]
+
+            # use peaks to find the local maxima and minima
+            peaks = np.array(peaks)
+            self.peaks = peaks
+            fs = np.arange(len(peaks)) + 1
+            min_fs = min(fs[fs > np.sqrt(min_facets)])
+            max_fs = max(fs[fs < max_facets / 10])
             i = np.logical_and(
-                dists_2d.flatten() >= dist, dists_2d.flatten() < dist + window_size)
-            peaks += [abs(eye_fft_shifted.flatten()[i]).mean()]
+                fs >= min_fs,
+                fs <= max_fs)
+            optimum = np.argmax((fs*peaks)[i])
+            optimum = fs[i][optimum]
+            self.fundamental_frequency = optimum
+            upper_bound = 1.5 * optimum
+            self.upper_bound = upper_bound
+            in_range = dists_2d < upper_bound
+            weights = np.ones(dists_2d.shape)
+            weights[in_range == False] = 0
+            self.weights = weights
 
-        # use peaks to find the local maxima and minima
-        peaks = np.array(peaks)
-        self.peaks = peaks
-        fs = np.arange(len(peaks)) + 1
-        min_fs = min(fs[fs > np.sqrt(min_facets)])
-        max_fs = max(fs[fs < max_facets / 10])
-        i = np.logical_and(
-            fs >= min_fs,
-            fs <= max_fs)
-        optimum = np.argmax((fs*peaks)[i])
-        optimum = fs[i][optimum]
-        self.fundamental_frequency = optimum
-        upper_bound = 1.5 * optimum
-        self.upper_bound = upper_bound
-        in_range = dists_2d < upper_bound
-        weights = np.ones(dists_2d.shape)
-        weights[in_range == False] = 0
-        self.weights = weights
+            # using the gaussian weights, invert back to the filtered image
+            selection_shifted = np.zeros(eye_fft.shape, dtype=complex)
+            selection_shifted = eye_fft_shifted*weights
+            selection_fft = np.fft.ifftshift(selection_shifted)
+            selection = np.fft.ifft2(selection_fft)
 
-        # using the gaussian weights, invert back to the filtered image
-        selection_shifted = np.zeros(eye_fft.shape, dtype=complex)
-        selection_shifted = eye_fft_shifted*weights
-        selection_fft = np.fft.ifftshift(selection_shifted)
-        selection = np.fft.ifft2(selection_fft)
-
-        self.eye_fft_shifted = eye_fft_shifted
-        self.selection_fft = selection_fft
-        self.filtered_eye = selection.real
-        self.centers = np.zeros(selection.shape)
-        if crop:
-            self.centers[self.mask] = self.filtered_eye[self.mask]
-
-        # use optimization function for find min_distance that minimizes
-        # the variance distances between centers and their nearest neighbors
-        d = int(np.round(max(self.image.shape) / 150.))
-        if not white_peak:
-            self.filtered_eye = self.filtered_eye.max() - self.filtered_eye
-
-        def lattice_std(dist, filtered_eye=self.filtered_eye, crop=crop):
-            arr = peak_local_max(filtered_eye, min_distance=dist,
-                                 exclude_border=False)
-            ys, xs = arr.T
+            self.eye_fft_shifted = eye_fft_shifted
+            self.selection_fft = selection_fft
+            self.filtered_eye = selection.real
+            self.centers = np.zeros(selection.shape)
             if crop:
-                in_eye = self.mask[ys, xs] == 1
-                ys, xs = ys[in_eye], xs[in_eye]
-            arr = np.array([ys, xs]).T
-            if arr.size > 0:
-                tree = spatial.KDTree(arr)
-                dists, inds = tree.query(arr, k=2)
-                dists = dists[:, 1]
-                std = dists.std()/np.sqrt(len(xs))
+                self.centers[self.mask] = self.filtered_eye[self.mask]
+
+            # use optimization function for find min_distance that minimizes
+            # the variance distances between centers and their nearest neighbors
+            d = int(np.round(max(self.image.shape) / 150.))
+            if not white_peak:
+                self.filtered_eye = self.filtered_eye.max() - self.filtered_eye
+
+            def lattice_std(dist, filtered_eye=self.filtered_eye, crop=crop):
+                arr = peak_local_max(filtered_eye, min_distance=dist,
+                                     exclude_border=False)
+                ys, xs = arr.T
+                if crop:
+                    in_eye = self.mask[ys, xs] == 1
+                    ys, xs = ys[in_eye], xs[in_eye]
+                arr = np.array([ys, xs]).T
+                if arr.size > 0:
+                    tree = spatial.KDTree(arr)
+                    dists, inds = tree.query(arr, k=2)
+                    dists = dists[:, 1]
+                    std = dists.std()/np.sqrt(len(xs))
+                else:
+                    std = 0
+                return std, (xs, ys)
+
+            old_std = np.inf
+            std = 0
+            # for num, dist in range(1, int(min(self.filtered_eye.shape)/5)):
+            old_xs, old_ys = [], []
+            # min_dist = int(np.floor(min(self.image.shape[:2])/np.sqrt(max_facets)))
+            min_dist = 1
+            max_dist = int(np.ceil(max(self.image.shape[:2])/(min_facets/10)))
+            stds = []
+            for num, dist in enumerate(range(min_dist, max_dist)[::-1]):
+                # print(dist)
+                std, (xs, ys) = lattice_std(dist)
+                stds += [std]
+                if std > 0 and std < old_std and len(xs) >= min_facets and len(xs) <= max_facets:
+                    old_std = std
+                    old_xs, old_ys = xs, ys
+
+            if len(old_xs) > 0:
+                self.ommatidia = np.array(
+                    [self.pixel_size*old_xs, self.pixel_size*old_ys])
             else:
-                std = 0
-            return std, (xs, ys)
-
-        old_std = np.inf
-        std = 0
-        # for num, dist in range(1, int(min(self.filtered_eye.shape)/5)):
-        old_xs, old_ys = [], []
-        # min_dist = int(np.floor(min(self.image.shape[:2])/np.sqrt(max_facets)))
-        min_dist = 1
-        max_dist = int(np.ceil(max(self.image.shape[:2])/(min_facets/10)))
-        stds = []
-        for num, dist in enumerate(range(min_dist, max_dist)[::-1]):
-            # print(dist)
-            std, (xs, ys) = lattice_std(dist)
-            stds += [std]
-            if std > 0 and std < old_std and len(xs) >= min_facets and len(xs) <= max_facets:
-                old_std = std
-                old_xs, old_ys = xs, ys
-
-        import pdb
-        pdb.set_trace()
-        if len(old_xs) > 0:
-            self.ommatidia = np.array(
-                [self.pixel_size*old_xs, self.pixel_size*old_ys])
-        else:
-            self.ommatidia = None
+                self.ommatidia = None
 
     def get_ommatidial_diameter(self, k_neighbors=7, radius=100,
                                 white_peak=True, min_facets=500, max_facets=50000):
