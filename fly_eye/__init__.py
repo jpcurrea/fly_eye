@@ -556,7 +556,8 @@ class Eye(Layer):
             self.cc), min(self.rr):max(self.rr)]
         self.eye = Eye(out[min(self.cc):max(self.cc),
                            min(self.rr):max(self.rr)],
-                       mask=new_mask)
+                       mask=new_mask,
+                       pixel_size=self.pixel_size)
         return self.eye
 
     def get_ommatidia(self, white_peak=True, min_facets=500, max_facets=50000,
