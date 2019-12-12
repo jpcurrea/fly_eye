@@ -977,7 +977,7 @@ class EyeStack(Stack):
         self.ommatidial_diameter_approx = self.eye.eye.ommatidial_diameter
         self.ommatidial_count_approx = len(self.eye.eye.ommatidia[0])
         self.interommatidial_angle_approx = 2 * np.arcsin(
-            self.ommatidial_count_approx/(2 * self.radius))
+            self.ommatidial_diameter_approx/(2 * self.radius))
 
         # vertical field of view using the major axis of the flat eye, in degrees
         self.fov_vertical = self.flat_eye.eye_length * 180. / np.pi
