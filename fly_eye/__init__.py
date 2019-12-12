@@ -504,12 +504,12 @@ class Eye(Layer):
             assert self.mask.mean() < 1 and self.mask.mean() > 0, print(
                 "input mask should not be a uniform image")
 
-    def get_eye_outline(self, hue_only=False, save=True):
+    def get_eye_outline(self, hue_only=False):
         if self.mask is None:
             self.select_color(hue_only=hue_only)
             self.mask = self.cs.mask
             self.mask = self.mask == 1
-            if save:
+            if self.mask_fn is not None:
                 img = PIL.Image.fromarray(self.mask)
                 img.save(self.mask_fn)
         contour = skimage.measure.find_contours(
@@ -962,7 +962,7 @@ class EyeStack(Stack):
         self.flat_eye = np.array([r_grid, g_grid, b_grid]).transpose((1, 2, 0))
         self.flat_eye = Eye(
             self.flat_eye, pixel_size=self.polar_grid_resolution,
-            mask_fn=self.eye_mask_fn.replace("mask", "flat_eye_mask"))
+            mask_fn=None)
 
         # in polar coordinates, distances correspond to angles in cartesian space
         self.flat_eye.get_ommatidial_diameter(white_peak=white_peak,
