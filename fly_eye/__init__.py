@@ -496,7 +496,7 @@ class Eye(Layer):
                 layer = Layer(self.mask_fn, bw=True)
                 self.mask = layer.load_image()
         if self.mask is not None and self.mask.dtype is not np.dtype('bool'):
-            self.mask = self.mask == self.mask.max()
+            self.mask = self.mask > 0
         if self.mask is not None:
             if self.mask.dtype is not np.dtype('bool'):
                 self.mask = self.mask == self.mask.max()
@@ -513,6 +513,7 @@ class Eye(Layer):
             if self.mask_fn is not None:
                 img = PIL.Image.fromarray(self.mask)
                 img.save(self.mask_fn)
+
         contour = skimage.measure.find_contours(
             (255/self.mask.max()) * self.mask.astype(int), 256/2)
         if len(contour) > 0:
@@ -520,7 +521,8 @@ class Eye(Layer):
             new_mask = np.zeros(self.mask.shape, dtype=int)
             new_mask[contour[:, 0], contour[:, 1]] = 1
             ndimage.binary_fill_holes(new_mask, output=new_mask)
-            new_mask = signal.medfilt2d(new_mask.astype('uint8'), 11).astype(bool)
+            new_mask = signal.medfilt2d(
+                new_mask.astype('uint8'), 11).astype(bool)
             self.eye_contour = np.round(contour).astype(int)
             self.conts = contour
             self.eye_mask = new_mask
@@ -557,7 +559,7 @@ class Eye(Layer):
             w = padding*width
             h = padding*height
             self.cc, self.rr = Ellipse(x, y, w, h,
-                                       shape=self.image.shape[:2][::-1],
+                                       shape=self.image.shape[:2],
                                        rotation=ang)
             out = np.copy(self.image)
             new_mask = self.mask[min(self.cc):max(
@@ -703,8 +705,10 @@ class Eye(Layer):
             x, y, radius = self.pixel_size * x, self.pixel_size * y, self.pixel_size * radius
             near_center = self.tree.query_ball_point([x, y], r=radius)
 
-            self.ommatidial_diameter = self.ommatidial_dists[near_center].mean()
-            self.ommatidial_diameter_SD = self.ommatidial_dists[near_center].std()
+            self.ommatidial_diameter = self.ommatidial_dists[near_center].mean(
+            )
+            self.ommatidial_diameter_SD = self.ommatidial_dists[near_center].std(
+            )
 
     def save(self, fn):
         """Save using pickle."""
