@@ -975,11 +975,14 @@ class EyeStack(Stack):
         nans = np.isnan(b_grid)
         b_grid[nans] = b_grid_nearest[nans]
 
+        polar_mask_grid = interpolate.griddata(
+            pred.T, self.mask.flatten(), (incl_new, azim_new), method='nearest')
+
         # self.flat_eye = np.array([r_grid_nearest, g_grid_nearest, b_grid_nearest]).transpose((1, 2, 0))
         self.flat_eye = np.array([r_grid, g_grid, b_grid]).transpose((1, 2, 0))
         self.flat_eye = Eye(
             self.flat_eye, pixel_size=self.polar_grid_resolution,
-            mask_fn=None)
+            mask=polar_mask_grid)
 
         # in polar coordinates, distances correspond to angles in cartesian space
         self.flat_eye.get_ommatidial_diameter(white_peak=white_peak,
