@@ -385,7 +385,7 @@ def fundamental_maxima(img, disp=True, p=5, window=5):
 
 def load_Eye(fn):
     with open(fn, "rb") as pickle_file:
-        return pickle.load(self, pickle_file)
+        return pickle.load(pickle_file)
 
 
 class Layer():
@@ -703,7 +703,7 @@ class Eye(Layer):
 
             (x, y), w, h, ang = self.ellipse.parameters()
             x, y, radius = self.pixel_size * x, self.pixel_size * y, self.pixel_size * radius
-            near_center = self.tree.query_ball_point([x, y], r=radius)
+            near_center = self.tree.query_ball_point([y, x], r=radius)
 
             self.ommatidial_diameter = self.ommatidial_dists[near_center].mean(
             )
