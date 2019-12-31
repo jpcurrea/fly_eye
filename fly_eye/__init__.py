@@ -571,7 +571,7 @@ class Eye(Layer):
             return self.eye
 
     def get_ommatidia(self, white_peak=True, min_facets=500, max_facets=50000,
-                      crop=True):
+                      crop=True, method=0):
         if self.image is None:
             self.load_image()
         if self.bw is False:
@@ -597,27 +597,51 @@ class Eye(Layer):
 
             # measure 2d power spectrum as a function of radial distance from center
             # using rolling maxima function to find the bounds of the fundamental spatial frequency
-            peaks = []
-            window_size = 3
-            for dist in np.arange(int(dists_2d.max()) - window_size):
-                i = np.logical_and(
-                    dists_2d.flatten() >= dist, dists_2d.flatten() < dist + window_size)
-                peaks += [abs(eye_fft_shifted.flatten()[i]).mean()]
+            if method == 0:
+                peaks = []
+                window_size = 3
+                for dist in np.arange(int(dists_2d.max()) - window_size):
+                    i = np.logical_and(
+                        dists_2d.flatten() >= dist, dists_2d.flatten() < dist + window_size)
+                    peaks += [abs(eye_fft_shifted.flatten()[i]).mean()]
 
-            # use peaks to find the local maxima and minima
-            peaks = np.array(peaks)
-            self.peaks = peaks
-            fs = np.arange(len(peaks)) + 1
-            min_fs = min(fs[fs > np.sqrt(min_facets)])
-            max_fs = max(fs[fs < max_facets / 10])
-            i = np.logical_and(
-                fs >= min_fs,
-                fs <= max_fs)
-            optimum = np.argmax((fs*peaks)[i])
-            optimum = fs[i][optimum]
-            self.fundamental_frequency = optimum
-            upper_bound = 1.5 * optimum
-            self.upper_bound = upper_bound
+                # use peaks to find the local maxima and minima
+                peaks = np.array(peaks)
+                self.peaks = peaks
+                fs = np.arange(len(peaks)) + 1
+                min_fs = min(fs[fs > np.sqrt(min_facets)])
+                max_fs = max(fs[fs < max_facets / 10])
+                i = np.logical_and(
+                    fs >= min_fs,
+                    fs <= max_fs)
+                optimum = np.argmax((fs*peaks)[i])
+                optimum = fs[i][optimum]
+                self.fundamental_frequency = optimum
+                upper_bound = 1.5 * optimum
+                self.upper_bound = upper_bound
+            else:
+                reciprocal = abs(eye_fft_shifted)
+                blurred = ndimage.gaussian_filter(reciprocal, sigma=15)
+                peaks = peak_local_max(blurred, num_peaks=20)
+                ys, xs = peaks.T
+                counts = []
+                dists = dists_2d[ys, xs]
+                for peak, dist in zip(peaks, dists):
+                    counts.append((dists == dist).sum())
+                counts = np.array(counts)
+                peaks = peaks[counts == 2]
+                dists = dists[counts == 2]
+                i = np.argsort(dists)
+                self.fundamental_frequency = np.mean(dists[i][:6])
+                upper_bound = 1.5 * self.fundamental_frequency
+                self.upper_bound = upper_bound
+                # xs, ys = xs[i], ys[i]
+                # plt.imshow(blurred)
+                # plt.scatter(xs, ys)
+                # plt.show()
+                # sbn.distplot(dists_2d[ys, xs])
+                # plt.show()
+                # breakpoint()
             in_range = dists_2d < upper_bound
             weights = np.ones(dists_2d.shape)
             weights[in_range == False] = 0
