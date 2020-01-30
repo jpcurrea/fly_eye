@@ -1,31 +1,32 @@
-import os
-import PIL
-import math
-import numpy as np
-import subprocess
-import seaborn as sbn
-
-from matplotlib import colors
-from matplotlib import pyplot as plt
-from matplotlib import mlab
-import skimage
-from skimage.draw import ellipse as Ellipse
-from skimage.feature import peak_local_max
-
-from numpy.linalg import eig, inv, norm
-from scipy import spatial, ndimage, stats, signal, interpolate
-from scipy.ndimage.filters import gaussian_filter
-from scipy.ndimage.measurements import center_of_mass
-
-import cv2
-from rolling_window import rolling_window
 from bird_call import Recording
+from rolling_window import rolling_window
+import cv2
+from scipy.ndimage.measurements import center_of_mass
+from scipy.ndimage.filters import gaussian_filter
+from scipy import spatial, ndimage, stats, signal, interpolate
+from numpy.linalg import eig, inv, norm
+from skimage.feature import peak_local_max
+from skimage.draw import ellipse as Ellipse
+import skimage
+from matplotlib import mlab
+from matplotlib import pyplot as plt
+from matplotlib import colors
+import seaborn as sbn
+import subprocess
+import numpy as np
+import math
+import PIL
+import os
+print("test")
+
 
 def rgb_2_gray(rgb):
     return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
 
+
 def gaussian(x, mu, sig):
     return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
+
 
 def print_progress(part, whole):
     import sys
@@ -34,7 +35,8 @@ def print_progress(part, whole):
     sys.stdout.write("[%-20s] %d%%" % ("="*int(20*prop), 100*prop))
     sys.stdout.flush()
 
-def interpolate_max(arr, heights=(0.,1.,2.)):
+
+def interpolate_max(arr, heights=(0., 1., 2.)):
     """Given 3 points or arrays, and their corresponding height
     coordinates, calculate the maximum of the Lagrange polynomial
     interpolation of those points. Useful for fast calculations.
@@ -48,12 +50,12 @@ def interpolate_max(arr, heights=(0.,1.,2.)):
     x2 = float(x2)
     x3 = float(x3)
 
-    num =   -(y1*(x2 - x3)*(-x2 - x3)
+    num = -(y1*(x2 - x3)*(-x2 - x3)
             + y2*(x1 - x3)*(x1 + x3)
             + y3*(x1 - x2)*(-x1 - x2))
     den = 2. * (y1*(x2 - x3)
-             -  y2*(x1 - x3)
-             +  y3*(x2 - x3))
+                - y2*(x1 - x3)
+                + y3*(x2 - x3))
 
     non_zero_den = np.array(den != 0, dtype=bool)
     zero_den = np.array(den == 0, dtype=bool)
@@ -73,6 +75,7 @@ def interpolate_max(arr, heights=(0.,1.,2.)):
     max_heights[i] = np.argmax(arr, axis=0)[i]
     return max_heights
 
+
 def cartesian_to_spherical(xs, ys, zs, center=[0, 0, 0]):
     pts = np.array([xs, ys, zs])
     center = np.array(center)
@@ -83,7 +86,8 @@ def cartesian_to_spherical(xs, ys, zs, center=[0, 0, 0]):
     azimuth = np.arctan2(ys, xs)
     return inclination, azimuth, radial_dists
 
-def spherical_to_cartesian(inclination, azimuth, radial_dists, center=[0,0,0]):
+
+def spherical_to_cartesian(inclination, azimuth, radial_dists, center=[0, 0, 0]):
     pts = np.array([inclination, azimuth, radial_dists])
     cx, cy, cz = center
     xs = radial_dists * np.sin(inclination) * np.cos(azimuth)
@@ -93,6 +97,7 @@ def spherical_to_cartesian(inclination, azimuth, radial_dists, center=[0,0,0]):
     ys += cy
     zs += cz
     return xs, ys, zs
+
 
 def sphereFit(spX, spY, spZ):
     #   Assemble the f matrix
@@ -108,6 +113,7 @@ def sphereFit(spX, spY, spZ):
     t = (C[0]*C[0])+(C[1]*C[1])+(C[2]*C[2])+C[3]
     radius = math.sqrt(t)
     return radius, np.squeeze(C[:-1])
+
 
 def rotate(arr, theta, axis=0):
     if axis == 0:
@@ -131,6 +137,7 @@ def rotate(arr, theta, axis=0):
     nz = np.squeeze(nz)
     return np.array([nx, ny, nz])
 
+
 def inside_angle(A, B, C):
     CA = A - C
     CB = B - C
@@ -142,25 +149,28 @@ def inside_angle(A, B, C):
 
 
 def fit_ellipse(x, y):
-    x = x[:,np.newaxis]
-    y = y[:,np.newaxis]
-    D =  np.hstack((x*x, x*y, y*y, x, y, np.ones_like(x)))
-    S = np.dot(D.T,D)
-    C = np.zeros([6,6])
-    C[0,2] = C[2,0] = 2; C[1,1] = -1
-    E, V =  eig(np.dot(inv(S), C))
+    x = x[:, np.newaxis]
+    y = y[:, np.newaxis]
+    D = np.hstack((x*x, x*y, y*y, x, y, np.ones_like(x)))
+    S = np.dot(D.T, D)
+    C = np.zeros([6, 6])
+    C[0, 2] = C[2, 0] = 2
+    C[1, 1] = -1
+    E, V = eig(np.dot(inv(S), C))
     n = np.argmax(np.abs(E))
-    a = V[:,n]
+    a = V[:, n]
     return a
 
-def ellipse_center(a):
-    b,c,d,f,g,a = a[1]/2, a[2], a[3]/2, a[4]/2, a[5], a[0]
-    num = b*b-a*c
-    x0=(c*d-b*f)/num
-    y0=(a*f-b*d)/num
-    return np.array([x0,y0])
 
-def set_radius_span(a1, a2, R=1, n = 100):
+def ellipse_center(a):
+    b, c, d, f, g, a = a[1]/2, a[2], a[3]/2, a[4]/2, a[5], a[0]
+    num = b*b-a*c
+    x0 = (c*d-b*f)/num
+    y0 = (a*f-b*d)/num
+    return np.array([x0, y0])
+
+
+def set_radius_span(a1, a2, R=1, n=100):
     vals = np.linspace(a1, a2, n)
     vals.sort()
     res = np.zeros((n*2+3, 2))
@@ -168,9 +178,10 @@ def set_radius_span(a1, a2, R=1, n = 100):
     res[1:n+1, 0] = vals[::-1]
     res[n+1, 0] = vals.min()
     res[n+2:2*n+2, 0] = vals
-    res[0,1] = R
+    res[0, 1] = R
     res[n+1:, 1] = R
     return res
+
 
 def local_maxima(img, p=5, window=10, min_diff=None,
                  disp=True):
@@ -241,7 +252,7 @@ def fundamental_maxima(img, disp=True, p=5, window=5):
         index = index[i]
 
         # return distance, index
-    
+
         inds = points[index].T
         key_freqs = fshift[inds[1], inds[0]]
         new_fshift = np.zeros(fshift.shape, dtype=complex)
@@ -409,8 +420,10 @@ class Eye(Layer):
         # out = np.zeros(self.image.shape, dtype='uint8')
         # out[self.cc, self.rr] = self.image[self.cc, self.rr]
         # self.eye = out
-        self.eye = Eye(out[min(self.cc):max(self.cc), min(self.rr):max(self.rr)])
-        self.eye.mask = self.mask[min(self.cc):max(self.cc), min(self.rr):max(self.rr)]
+        self.eye = Eye(out[min(self.cc):max(self.cc),
+                           min(self.rr):max(self.rr)])
+        self.eye.mask = self.mask[min(self.cc):max(
+            self.cc), min(self.rr):max(self.rr)]
         return self.eye
 
     def get_ommatidia(self, overlap=5, window_length=5, sigma=3, mask=None,
@@ -429,7 +442,8 @@ class Eye(Layer):
         eye_fft = np.fft.fft2(eye_sats)
         eye_fft_shifted = np.fft.fftshift(eye_fft)
 
-        xinds, yinds = np.meshgrid(range(eye_fft.shape[1]), range(eye_fft.shape[0]))
+        xinds, yinds = np.meshgrid(
+            range(eye_fft.shape[1]), range(eye_fft.shape[0]))
         ycenter, xcenter = np.array(eye_fft.shape)/2
 
         xdiffs, ydiffs = xinds - xcenter, yinds - ycenter
@@ -447,7 +461,7 @@ class Eye(Layer):
             i = np.logical_and(
                 dists_2d.flatten() >= dist, dists_2d.flatten() < dist + window_size)
             peaks += [abs(eye_fft_shifted.flatten()[i]).mean()]
-        
+
         # use peaks to find the local maxima and minima
         peaks = np.array(peaks)
         self.peaks = peaks
@@ -468,7 +482,7 @@ class Eye(Layer):
         upper_bound = 1.5 * optimum
         self.upper_bound = upper_bound
 
-        # std = (upper_bound - lower_bound)/4  # 
+        # std = (upper_bound - lower_bound)/4  #
         # std = .1 * optimum
         # weights = gaussian(dists_2d, optimum, std)
         # in_range = np.logical_and(
@@ -504,7 +518,7 @@ class Eye(Layer):
             ys, xs = peak_local_max(
                 self.filtered_eye.max() - self.filtered_eye,
                 min_distance=d).T
-            
+
         in_eye = self.mask[ys, xs] == 1
         ys, xs = ys[in_eye], xs[in_eye]
 
@@ -542,6 +556,7 @@ class Stack():
     """ A class for combining multiple images into one by taking those
     with the highest focus value determined by the sobel operator.
     """
+
     def __init__(self, dirname="./", f_type=".jpg", bw=False, eye=True):
         self.dirname = dirname
         fns = os.listdir(self.dirname)
@@ -676,6 +691,7 @@ class Stack():
 class EyeStack(Stack):
     """A special stack for handling a focus stack of fly eye images.
     """
+
     def __init__(self, dirname, f_type=".jpg", bw=False,
                  pixel_size=1, depth_size=1):
         Stack.__init__(self, dirname, f_type, bw)
@@ -696,7 +712,7 @@ class EyeStack(Stack):
         self.stack = self.stack[min(self.eye.cc):max(self.eye.cc),
                                 min(self.eye.rr):max(self.eye.rr)]
         self.mask = self.eye.cs.mask[min(self.eye.cc):max(self.eye.cc),
-                                 min(self.eye.rr):max(self.eye.rr)]
+                                     min(self.eye.rr):max(self.eye.rr)]
         self.eye.eye_contour[:, 0] -= min(self.eye.rr)
         self.eye.eye_contour[:, 1] -= min(self.eye.cc)
         # self.eye = Eye(self.eye.eye)
@@ -751,7 +767,8 @@ class EyeStack(Stack):
         # outline2 = rotate(outline1.T, ang2, axis=0)
         # 4. convert to spherical coordinates now that they are centered
         xs, ys, zs = rot2
-        self.inclination, self.azimuth, self.radii = cartesian_to_spherical(xs, ys, zs)
+        self.inclination, self.azimuth, self.radii = cartesian_to_spherical(
+            xs, ys, zs)
         self.polar = np.array([self.inclination, self.azimuth, self.radii])
         # outline_inclination, outline_azimuth, outline_radii = cartesian_to_spherical(
         #     outline2[0], outline[1], outline[2])
@@ -763,7 +780,8 @@ class EyeStack(Stack):
         # resolution of the original image
         incl_range = self.inclination.max() - self.inclination.min()
         azim_range = self.azimuth.max() - self.azimuth.min()
-        resolution = min(incl_range, azim_range) / np.sqrt(width**2 + height**2)
+        resolution = min(incl_range, azim_range) / \
+            np.sqrt(width**2 + height**2)
         self.polar_grid_resolution = resolution
         incl_new = np.linspace(
             self.inclination.min(),
@@ -800,22 +818,26 @@ class EyeStack(Stack):
         # nans = np.isnan(b_grid)
         # b_grid[nans] = b_grid_nearest[nans]
 
-        self.flat_eye = np.array([r_grid_nearest, g_grid_nearest, b_grid_nearest]).transpose((1, 2, 0))
-        self.flat_eye = Eye(self.flat_eye, pixel_size=self.polar_grid_resolution)
+        self.flat_eye = np.array(
+            [r_grid_nearest, g_grid_nearest, b_grid_nearest]).transpose((1, 2, 0))
+        self.flat_eye = Eye(
+            self.flat_eye, pixel_size=self.polar_grid_resolution)
 
         # in polar coordinates, distances correspond to angles in cartesian space
-        self.flat_eye.get_ommatidial_diameter(white_peak=white_peak)  
+        self.flat_eye.get_ommatidial_diameter(white_peak=white_peak)
         # interommatidial_ange in degrees
         self.interommatidial_angle = self.flat_eye.ommatidial_diameter * 180. / np.pi
         # ommatidial diameter in mm
-        self.ommatidial_diameter = 2 * self.radius * np.sin(self.flat_eye.ommatidial_diameter)
+        self.ommatidial_diameter = 2 * self.radius * \
+            np.sin(self.flat_eye.ommatidial_diameter)
 
         # vertical field of view using the major axis of the flat eye, in degrees
         self.fov_vertical = self.flat_eye.eye_length * 180. / np.pi
         # horizontal field of view using the minor axis of the flat eye, in degrees
         self.fov_horizontal = self.flat_eye.eye_width * 180. / np.pi
         # field of view approximating the area as an ellipse, in steradians
-        self.fov = np.pi * (self.flat_eye.eye_width / 2) * (self.flat_eye.eye_length / 2)
+        self.fov = np.pi * (self.flat_eye.eye_width / 2) * \
+            (self.flat_eye.eye_length / 2)
 
 
 class Video(Stack):
@@ -847,7 +869,7 @@ class Video(Stack):
             if os.path.isdir(self.dirname) is False:
                 os.mkdir(self.dirname)
             try:
-                if len(os.listdir(self.dirname))  == 0:
+                if len(os.listdir(self.dirname)) == 0:
                     failed = subprocess.check_output(
                         ["ffmpeg", "-i", self.filename,
                          "-vf", "scale=720:-1",
@@ -1039,9 +1061,11 @@ class ColorSelector():
         self.hue_hi = self.colors[:, 0].max()
         # hue_low, hue_hi = np.percentile(self.hsv[:, 0], [.5, 99.5])
         # self.sats_low, self.sats_hi = np.percentile(self.hsv[:, 1], [2.5, 97.5])
-        self.sats_low, self.sats_hi = self.colors[:, 1].min(), self.colors[:, 1].max()
+        self.sats_low, self.sats_hi = self.colors[:, 1].min(
+        ), self.colors[:, 1].max()
         # self.vals_low, self.vals_hi = np.percentile(self.hsv[:, 2], [2.5, 97.5])
-        self.vals_low, self.vals_hi = self.colors[:, 2].min(), self.colors[:, 2].max()
+        self.vals_low, self.vals_hi = self.colors[:, 2].min(
+        ), self.colors[:, 2].max()
         if self.hue_low < 0:    # if range overlaps 0, use or logic
             self.hue_low = 1 + self.hue_low
             comp_func = np.logical_or
