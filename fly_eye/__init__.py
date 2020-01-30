@@ -849,7 +849,6 @@ class Stack():
                 self.focuses = focuses
                 self.images = images
                 h = interpolate_max(focuses)
-                breakpoint()
                 self.heights = (heights-1) + h
                 h, w = self.heights.shape
                 xs, ys = np.arange(w), np.arange(h)
