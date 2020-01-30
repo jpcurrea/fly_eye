@@ -657,7 +657,6 @@ class Eye(Layer):
                 # sbn.distplot(dists_2d[ys, xs])
                 # plt.show()
                 # breakpoint()
-            print("test")
             in_range = dists_2d < upper_bound
             weights = np.ones(dists_2d.shape)
             weights[in_range == False] = 0
