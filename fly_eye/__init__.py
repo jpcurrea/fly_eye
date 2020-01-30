@@ -547,7 +547,7 @@ class Eye(Layer):
                 plt.plot(self.eye_contour[:, 0], self.eye_contour[:, 1])
                 plt.show()
 
-    def crop_eye(self, padding=1.05, hue_only=False):
+    def crop_eye(self, padding=1.05, hue_only=False, use_ellipse_fit=False):
         if self.image is None:
             self.load_image()
         if self.ellipse is None:
@@ -562,13 +562,28 @@ class Eye(Layer):
                                        shape=self.image.shape[:2],
                                        rotation=ang)
             out = np.copy(self.image)
-            new_mask = self.mask[min(self.cc):max(
-                self.cc), min(self.rr):max(self.rr)]
-            self.eye = Eye(out[min(self.cc):max(self.cc),
-                               min(self.rr):max(self.rr)],
-                           mask=new_mask,
-                           pixel_size=self.pixel_size)
-            return self.eye
+            if use_ellipse_fit:
+                new_mask = self.mask[min(self.cc):max(
+                    self.cc), min(self.rr):max(self.rr)]
+                self.eye = Eye(out[min(self.cc):max(self.cc),
+                                   min(self.rr):max(self.rr)],
+                               mask=new_mask,
+                               pixel_size=self.pixel_size)
+                return self.eye
+            else:
+                xs, ys = np.where(self.mask)
+                minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
+                minx -= padding / 2
+                miny -= padding / 2
+                maxx += padding / 2
+                maxy += padding / 2
+                minx, maxx, miny, maxy = int(round(minx)), int(round(
+                    maxx)), int(round(miny)), int(round(maxy))
+                new_mask = self.mask[minx:maxx, miny:maxy]
+                self.eye = Eye(out[minx:maxx, miny:maxy],
+                               mask=new_mask,
+                               pixel_size=self.pixel_size)
+                return self.eye
 
     def get_ommatidia(self, white_peak=True, min_facets=500, max_facets=50000,
                       crop=True, method=0):
@@ -714,17 +729,15 @@ class Eye(Layer):
             self.tree = spatial.KDTree(self.ommatidia.T)
             dists, inds = self.tree.query(self.ommatidia.T, k=k_neighbors+1)
             dists = dists[:, 1:]
-            meds = np.repeat(np.median(dists, axis=1),
-                             k_neighbors).reshape(dists.shape)
-            too_small = dists < .2*meds
+            meds = dists[:, 1]
+            too_small = dists < .2*meds[:, np.newaxis]
             dists[too_small] = np.nan
-            mins = np.repeat(np.nanmin(dists, axis=1),
-                             k_neighbors).reshape(dists.shape)
-            magn = dists / mins
-            too_large = magn > 1.75
+            mins = np.nanmin(dists, axis=1)
+            magn = dists / mins[:, np.newaxis]
+            too_large = magn > 1.5
             dists[too_large] = np.nan
             self.ommatidial_dists = np.nanmean(dists, axis=1)
-
+            self.ommatidial_dists_tree = dists
             (x, y), w, h, ang = self.ellipse.parameters()
             x, y, radius = self.pixel_size * x, self.pixel_size * y, self.pixel_size * radius
             near_center = self.tree.query_ball_point([y, x], r=radius)
@@ -779,7 +792,7 @@ class Stack():
             l.image = None
         return samples**-1*res
 
-    def focus_stack(self, smooth=0, interpolate=True, use_all=False,
+    def focus_stack(self, smooth=0, interpolate_heights=True, use_all=False,
                     layer_smooth=0):
         """The main method which compares the layers of the stack and
         forms the focus stack using the sobel operator, which is generated
@@ -796,7 +809,7 @@ class Stack():
                     self.focuses += [layer.focus(smooth=layer_smooth)]
                 self.focuses = np.array(self.focuses)
                 self.images = np.array(self.images)
-                if interpolate:
+                if interpolate_heights:
                     print("this is not available yet")
                 else:
                     top_focus = np.argmax(self.focuses, axis=0)
@@ -836,8 +849,24 @@ class Stack():
                 self.focuses = focuses
                 self.images = images
                 h = interpolate_max(focuses)
+                breakpoint()
                 self.heights = (heights-1) + h
-                if interpolate:
+                h, w = self.heights.shape
+                xs, ys = np.arange(w), np.arange(h)
+                xgrid, ygrid = np.meshgrid(xs, ys)
+                vals = np.array(
+                    [xgrid.flatten(), ygrid.flatten(), self.heights.flatten()]).T
+                hull = spatial.ConvexHull(vals)
+                xs, ys, zs = vals[hull.vertices].T
+                img = np.zeros(self.heights.shape, dtype=float)
+                img[ys.astype(int), xs.astype(int)] = zs
+                grid = interpolate.griddata(np.array([ys, xs]).T, zs,
+                                            (xgrid, ygrid), method='linear')
+                # fig = plt.figure()
+                # ax = fig.add_subplot(111, projection='3d')
+                # ax.scatter(xgrid, ygrid, self.heights)
+                # breakpoint()
+                if interpolate_heights:
                     down = np.floor(h)
                     up = np.ceil(h)
                     up[up == 0] = 1
