@@ -636,7 +636,13 @@ class Eye(Layer):
                 self.upper_bound = upper_bound
             else:
                 reciprocal = abs(eye_fft_shifted)
-                blurred = ndimage.gaussian_filter(reciprocal, sigma=15)
+                midv, midh = np.round(np.array(reciprocal.shape)/2).astype(int)
+                pad = 5
+                newv = reciprocal[[midv-pad, midv+pad]].mean(0)
+                newh = reciprocal[:, [midh-pad, midh+pad]].mean(1)
+                reciprocal[midv - (pad - 1): midv + pad] = newv[np.newaxis]
+                reciprocal[:, midh - (pad - 1): midh + pad] = newh[:, np.newaxis]
+                blurred = ndimage.gaussian_filter(dists_2d * reciprocal, sigma=15)
                 peaks = peak_local_max(blurred, num_peaks=20)
                 ys, xs = peaks.T
                 counts = []
@@ -647,11 +653,11 @@ class Eye(Layer):
                 peaks = peaks[counts == 2]
                 dists = dists[counts == 2]
                 i = np.argsort(dists)
-                self.fundamental_frequency = np.mean(dists[i][:6])
+                self.fundamental_frequency = np.mean(dists[i][3:5])
                 upper_bound = 1.5 * self.fundamental_frequency
                 self.upper_bound = upper_bound
-                # xs, ys = xs[i], ys[i]
-                # plt.imshow(blurred)
+                xs, ys = xs[i], ys[i]
+                # plt.imshow(dists_2d * blurred)
                 # plt.scatter(xs, ys)
                 # plt.show()
                 # sbn.distplot(dists_2d[ys, xs])
@@ -849,7 +855,6 @@ class Stack():
                 self.focuses = focuses
                 self.images = images
                 h = interpolate_max(focuses)
-                breakpoint()
                 self.heights = (heights-1) + h
                 # h, w = self.heights.shape
                 # xs, ys = np.arange(w), np.arange(h)
@@ -1042,6 +1047,9 @@ class EyeStack(Stack):
         # in polar coordinates, distances correspond to angles in cartesian space
         self.flat_eye.get_ommatidial_diameter(white_peak=white_peak,
                                               min_facets=min_facets, max_facets=max_facets)
+        # TO DO: get ommatidia from focus stack instead (it works a lot better most of the time),
+        # then convert centers to spherical coordinates
+
         if self.flat_eye.ommatidia is not None:
             # interommatidial_ange in degrees
             self.interommatidial_angle = self.flat_eye.ommatidial_diameter * 180. / np.pi
