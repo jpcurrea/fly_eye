@@ -851,17 +851,19 @@ class Stack():
                 h = interpolate_max(focuses)
                 breakpoint()
                 self.heights = (heights-1) + h
-                h, w = self.heights.shape
-                xs, ys = np.arange(w), np.arange(h)
-                xgrid, ygrid = np.meshgrid(xs, ys)
-                vals = np.array(
-                    [xgrid.flatten(), ygrid.flatten(), self.heights.flatten()]).T
-                hull = spatial.ConvexHull(vals)
-                xs, ys, zs = vals[hull.vertices].T
-                img = np.zeros(self.heights.shape, dtype=float)
-                img[ys.astype(int), xs.astype(int)] = zs
-                grid = interpolate.griddata(np.array([ys, xs]).T, zs,
-                                            (xgrid, ygrid), method='linear')
+                # h, w = self.heights.shape
+                # xs, ys = np.arange(w), np.arange(h)
+                # xgrid, ygrid = np.meshgrid(xs, ys)
+                # vals = np.array(
+                #     [xgrid.flatten(), ygrid.flatten(), self.heights.flatten()]).T
+                # vals = np.array(
+                #     [xgrid.flatten(), ygrid.flatten(), sub.flatten()]).T
+                # hull = spatial.ConvexHull(vals.max() - vals)
+                # xs, ys, zs = vals[hull.vertices].T
+                # img = np.zeros(self.heights.shape, dtype=float)
+                # img[ys.astype(int), xs.astype(int)] = zs
+                # grid = interpolate.griddata(np.array([ys, xs]).T, zs,
+                #                             (xgrid, ygrid), method='linear')
                 # fig = plt.figure()
                 # ax = fig.add_subplot(111, projection='3d')
                 # ax.scatter(xgrid, ygrid, self.heights)
