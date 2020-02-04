@@ -432,7 +432,7 @@ class Points():
         if spherical_conversion:
             # fit sphere
             x, y, z = self.pts.T
-            self.radius, self.center, self.resid_ = sphereFit(x, y, z)
+            self.radius, self.center = sphereFit(x, y, z)
             if center_points:
                 # center points using the center of that sphere
                 self.pts = self.pts - self.center
@@ -463,7 +463,10 @@ class Points():
     def spherical(self, center=None):
         if center is None:
             center = self.center
-        self.polar = cartesian_to_spherical(self.pts, center=center)
+        # self.polar = cartesian_to_spherical(self.pts, center=center)
+        xs, ys, zs = self.pts.T
+        self.polar = np.array(cartesian_to_spherical(
+            xs, ys, zs, center=center)).T
         self.theta, self.phi, self.radii = self.polar.T
         self.residuals = self.radii - self.radius
 
@@ -824,7 +827,7 @@ class Eye(Layer):
                 newh = reciprocal[:, [midh-pad, midh+pad]].mean(1)
                 reciprocal[midv - (pad - 1): midv + pad] = newv[np.newaxis]
                 reciprocal[:, midh - (pad - 1): midh +
-                                      pad] = newh[:, np.newaxis]
+                           pad] = newh[:, np.newaxis]
                 blurred = ndimage.gaussian_filter(
                     dists_2d * reciprocal, sigma=15)
                 peaks = peak_local_max(blurred, num_peaks=20)
@@ -1131,7 +1134,8 @@ class EyeStack(Stack):
         self.eye_contour[:, 1] -= min(self.eye.rr)
         # self.eye = Eye(self.eye.eye)
 
-    def get_3d_data(self, averaging_range=5, white_peak=True, min_facets=500, max_facets=5000):
+    def get_3d_data(self, averaging_range=5, white_peak=True,
+                    min_facets=500, max_facets=5000):
         if self.stack is None:
             self.get_eye_stack()
         height, width = self.heights.shape
@@ -1157,24 +1161,27 @@ class EyeStack(Stack):
         ys, xs, zs = self.eye_3d_masked
         self.radius, self.center = sphereFit(xs, ys, zs)
         self.eye_3d -= self.center[:, np.newaxis]
+        self.points = Points(self.eye_3d.T)
         # rotate points until center of mass is only on the x axis
         # this centers the eye in polar coordinates, minimizing distortion due to the projection
         # also, rotate the eye contour by the same rotation
         # 1. find center of mass
-        com = self.eye_3d.mean(1)
-        # 2. rotate com along x (com[0]) axis until z (com[2]) = 0
-        ang1 = np.arctan2(com[2], com[1])
-        com1 = rotate(com, ang1, axis=0)
-        rot1 = rotate(self.eye_3d.T, ang1, axis=0)
-        # 3. rotate com along z (com[2]) axis until y (com[1])= 0
-        ang2 = np.arctan2(com1[1], com1[0])
-        com2 = rotate(com1, ang2, axis=2)
-        rot2 = rotate(rot1.T, ang2, axis=2)
-        # 4. convert to spherical coordinates now that they are centered
-        xs, ys, zs = rot2
-        self.inclination, self.azimuth, self.radii = cartesian_to_spherical(
-            xs, ys, zs)
-        self.polar = np.array([self.inclination, self.azimuth, self.radii])
+        # com = self.eye_3d.mean(1)
+        # # 2. rotate com along x (com[0]) axis until z (com[2]) = 0
+        # ang1 = np.arctan2(com[2], com[1])
+        # com1 = rotate(com, ang1, axis=0)
+        # rot1 = rotate(self.eye_3d.T, ang1, axis=0)
+        # # 3. rotate com along z (com[2]) axis until y (com[1])= 0
+        # ang2 = np.arctan2(com1[1], com1[0])
+        # com2 = rotate(com1, ang2, axis=2)
+        # rot2 = rotate(rot1.T, ang2, axis=2)
+        # # 4. convert to spherical coordinates now that they are centered
+        # xs, ys, zs = rot2
+        self.inclination, self.azimuth, self.radii = self.points.polar.T
+        self.polar = self.points.polar.T
+        # self.inclination, self.azimuth, self.radii = cartesian_to_spherical(
+        #     xs, ys, zs)
+        # self.polar = np.array([self.inclination, self.azimuth, self.radii])
         # using polar coordinates, 'flatten' the image of the eye
         # 1. create a grid for sampling the polar data
         # use a resultion that is high enough for the smallest range
@@ -1222,42 +1229,44 @@ class EyeStack(Stack):
         polar_mask_grid = interpolate.griddata(
             pred.T, self.mask.flatten(), (incl_new, azim_new), method='nearest')
 
-        # self.flat_eye = np.array([r_grid_nearest, g_grid_nearest, b_grid_nearest]).transpose((1, 2, 0))
+        # self.flat_eye = np.array(
+        #     [r_grid_nearest, g_grid_nearest, b_grid_nearest]).transpose((1, 2, 0))
         self.flat_eye = np.array([r_grid, g_grid, b_grid]).transpose((1, 2, 0))
         self.flat_eye = Eye(
             self.flat_eye, pixel_size=self.polar_grid_resolution,
             mask=polar_mask_grid)
-        self.eye = Eye(
-
+        # breakpoint()
+        # self.eye = Eye(
         # in polar coordinates, distances correspond to angles in cartesian space
-        # self.flat_eye.get_ommatidial_diameter(white_peak=white_peak,
-        #                                       min_facets=min_facets, max_facets=max_facets)
-        self.eye=# TO DO: get ommatidia from focus stack instead (it works a lot better most of the time),
-        # then convert centers to spherical coordinates
-
+        self.flat_eye.get_ommatidial_diameter(white_peak=white_peak,
+                                              min_facets=min_facets, max_facets=max_facets)
         if self.flat_eye.ommatidia is not None:
             # interommatidial_ange in degrees
-            self.interommatidial_angle=self.flat_eye.ommatidial_diameter * 180. / np.pi
+            self.io_angle_flat_approx = self.flat_eye.ommatidial_diameter * 180. / np.pi
             # ommatidial diameter in mm
-            self.ommatidial_diameter=self.radius * self.flat_eye.ommatidial_diameter
+            self.ommatidial_diameter_flat_approx = self.radius * \
+                self.flat_eye.ommatidial_diameter
             # ommatidial diameter, io angle, and ommatidial counts can be approximated
             # from the projected image as well. these will be treated as approximations
             self.eye.eye.get_ommatidial_diameter(white_peak=white_peak,
                                                  min_facets=min_facets, max_facets=max_facets)
-            self.ommatidial_diameter_approx=self.eye.eye.ommatidial_diameter
-            self.ommatidial_count_approx=len(self.eye.eye.ommatidia[0])
-            if self.radius > self.ommatidial_diameter_approx:
-                self.interommatidial_angle_approx=2 * np.arcsin(
-                    self.ommatidial_diameter_approx/(2 * self.radius)) * 180 / np.pi
+            self.ommatidial_diameter = self.eye.eye.ommatidial_diameter
+            self.ommatidial_count = len(self.eye.eye.ommatidia[0])
+            if self.radius > self.ommatidial_diameter:
+                self.io_angle_spherical_approx = 2 * np.arcsin(
+                    self.ommatidial_diameter/(2 * self.radius)) * 180 / np.pi
             else:
-                self.interommatidial_angle_approx=np.nan
+                self.io_angle_spherical_approx = np.nan
+            breakpoint()
+            ommatidia_zs = []
+            ommatidia_xs, ommatidia_zs = self.eye.eye.ommatidia
 
             # vertical field of view using the major axis of the flat eye, in degrees
-            self.fov_vertical=self.flat_eye.eye_length * 180. / np.pi
+            self.fov_vertical = self.flat_eye.eye_length * 180. / np.pi
             # horizontal field of view using the minor axis of the flat eye, in degrees
-            self.fov_horizontal=self.flat_eye.eye_width * 180. / np.pi
+            self.fov_horizontal = self.flat_eye.eye_width * 180. / np.pi
             # field of view approximating the area as an ellipse, in steradians
-            self.fov=np.pi * (self.flat_eye.eye_width / 2) * \
+            self.fov = np.pi * (self.flat_eye.eye_width / 2) * \
                 (self.flat_eye.eye_length / 2)
 
 
@@ -1266,32 +1275,32 @@ class Video(Stack):
     and uses common functions to track motion or color."""
 
     def __init__(self, filename, fps=30, f_type=".jpg"):
-        self.vid_formats=[
+        self.vid_formats = [
             '.mov',
             '.mp4',
             '.mpg',
             '.avi']
-        self.filename=filename
-        self.f_type=f_type
-        self.track=None
-        self.colors=None
+        self.filename = filename
+        self.f_type = f_type
+        self.track = None
+        self.colors = None
         if ((os.path.isfile(self.filename) and
              self.filename.lower()[-4:] in self.vid_formats)):
             # if file is a video, use ffmpeg to generate a jpeg stack
-            self.dirname=self.filename[:-4]
-            self.fps=subprocess.check_output([
+            self.dirname = self.filename[:-4]
+            self.fps = subprocess.check_output([
                 "ffprobe", "-v", "error", "-select_streams", "v:0",
                 "-show_entries", "stream=avg_frame_rate", "-of",
                 "default=noprint_wrappers=1:nokey=1",
                 self.filename])
-            self.fps=int(str(fps))
+            self.fps = int(str(fps))
             # self.fps = int(self.fps.split("/"))
             # self.fps = float(self.fps[0])/float(self.fps[1])
             if os.path.isdir(self.dirname) is False:
                 os.mkdir(self.dirname)
             try:
                 if len(os.listdir(self.dirname)) == 0:
-                    failed=subprocess.check_output(
+                    failed = subprocess.check_output(
                         ["ffmpeg", "-i", self.filename,
                          "-vf", "scale=720:-1",
                          "./{}/frame%05d{}".format(self.dirname, self.f_type)])
@@ -1299,8 +1308,8 @@ class Video(Stack):
                 print("failed to parse video into {}\
                 stack!".format(self.f_type))
             try:
-                audio_fname="{}.wav".format(self.filename[:-4])
-                failed=subprocess.check_output(
+                audio_fname = "{}.wav".format(self.filename[:-4])
+                failed = subprocess.check_output(
                     ["ffmpeg", "-i", self.filename, "-f", "wav",
                      "-ar", "44100",
                      "-ab", "128",
@@ -1309,19 +1318,19 @@ class Video(Stack):
                 print("failed to get audio from video!")
 
         elif os.path.isdir(self.filename):
-            self.dirname=self.filename
-            self.fps=fps
+            self.dirname = self.filename
+            self.fps = fps
         Stack.__init__(self, self.dirname, f_type=self.f_type)
 
     def select_color_range(self, samples=5):
-        color_range=[]
-        intervals=len(self.layers)/samples
+        color_range = []
+        intervals = len(self.layers)/samples
         for l in self.layers[::intervals]:
             l.select_color()
             color_range += [l.cs.colors]
-            l.image=None
-        color_range=np.array(color_range)
-        self.colors=np.array([color_range.min((0, 1)),
+            l.image = None
+        color_range = np.array(color_range)
+        self.colors = np.array([color_range.min((0, 1)),
                                 color_range.max((0, 1))])
 
     def track_foreground(self, diff_threshold=None, frames_avg=50,
@@ -1330,23 +1339,23 @@ class Video(Stack):
         background and the absolut difference between each frame and the
         background as the foreground.
         """
-        avg=self.get_average(frames_avg)
-        self.track=[]
-        self.diffs=[]
+        avg = self.get_average(frames_avg)
+        self.track = []
+        self.diffs = []
         for ind, layer in enumerate(self.layers):
-            diff=abs(layer.load_image() - avg)
-            diff=colors.rgb_to_hsv(diff)[..., 2]
-            layer.image=None
-            diff=gaussian_filter(diff, smooth_std)
-            layer.diff=diff
+            diff = abs(layer.load_image() - avg)
+            diff = colors.rgb_to_hsv(diff)[..., 2]
+            layer.image = None
+            diff = gaussian_filter(diff, smooth_std)
+            layer.diff = diff
             if diff_threshold is None:
-                xs, ys=local_maxima(diff, disp=False, p=95)
+                xs, ys = local_maxima(diff, disp=False, p=95)
                 if len(xs) > 0:
                     self.track += [(xs[0], ys[0])]
                 else:
                     self.track += [(np.nan, np.nan)]
             else:
-                xs, ys=local_maxima(diff, disp=False,
+                xs, ys = local_maxima(diff, disp=False,
                                       min_diff=diff_threshold)
                 if len(xs) > 0:
                     self.track += [(xs, ys)]
@@ -1365,50 +1374,50 @@ class Video(Stack):
             self.select_color_range(samples=samples)
         if self.track is None:
             print("tracking color range")
-            self.track=[]
-            progress=0
+            self.track = []
+            progress = 0
             for l in self.layers:
-                img=l.load_image()
-                hsv=colors.rgb_to_hsv(img)
-                low_hue=self.colors[:, 0].min()
-                hi_hue=self.colors[:, 0].max()
+                img = l.load_image()
+                hsv = colors.rgb_to_hsv(img)
+                low_hue = self.colors[:, 0].min()
+                hi_hue = self.colors[:, 0].max()
                 if low_hue < 0:
-                    hues=np.logical_or(
+                    hues = np.logical_or(
                         hsv[:, :, 0] > 1 + low_hue,
                         hsv[:, :, 0] < hi_hue)
                 else:
-                    hues=np.logical_and(
+                    hues = np.logical_and(
                         hsv[:, :, 0] > low_hue,
                         hsv[:, :, 0] < hi_hue)
-                sats=np.logical_and(
+                sats = np.logical_and(
                     hsv[:, :, 1] > self.colors[:, 1].min(),
                     hsv[:, :, 1] < self.colors[:, 1].max())
-                vals=np.logical_and(
+                vals = np.logical_and(
                     hsv[:, :, 2] > self.colors[:, 2].min(),
                     hsv[:, :, 2] < self.colors[:, 2].max())
-                mask=np.logical_and(hues, sats, vals)
-                track=center_of_mass(mask)
+                mask = np.logical_and(hues, sats, vals)
+                track = center_of_mass(mask)
                 self.track += [(track[1], track[0])]
                 # l.image = None
                 progress += 1
                 print_progress(progress, len(self.layers))
         if display:
             # plt.ion()
-            first=True
+            first = True
             for l, (x, y) in zip(self.layers, self.track):
                 # l.load_image()
                 if first:
-                    self.image_fig=plt.imshow(l.image)
-                    dot=plt.plot(x, y, 'o')
+                    self.image_fig = plt.imshow(l.image)
+                    dot = plt.plot(x, y, 'o')
                     plt.show()
                 else:
                     self.image_fig.set_data(l.image)
                     dot[0].set_data(x, y)
                     plt.draw()
                     plt.pause(.001)
-                l.image=None
+                l.image = None
                 if first:
-                    first=False
+                    first = False
 
 
 class ColorSelector():
@@ -1421,38 +1430,38 @@ class ColorSelector():
 
     def __init__(self, frame, bw=False, hue_only=False):
         from matplotlib import gridspec
-        self.bw=bw
+        self.bw = bw
         if isinstance(frame, str):
-            frame=ndimage.imread(frame)
-        self.frame=frame
-        self.mask=np.ones(self.frame.shape[:2])
-        self.colors=np.array([[0, 0, 0], [1, 1, 255]])
-        self.fig=plt.figure(figsize=(8, 8), num="Color Selector")
-        self.hue_only=hue_only
-        gs=gridspec.GridSpec(6, 4)
+            frame = ndimage.imread(frame)
+        self.frame = frame
+        self.mask = np.ones(self.frame.shape[:2])
+        self.colors = np.array([[0, 0, 0], [1, 1, 255]])
+        self.fig = plt.figure(figsize=(8, 8), num="Color Selector")
+        self.hue_only = hue_only
+        gs = gridspec.GridSpec(6, 4)
 
-        self.pic=self.fig.add_subplot(gs[:3, 1:])
+        self.pic = self.fig.add_subplot(gs[:3, 1:])
         plt.title("Original")
         plt.imshow(self.frame.astype('uint8'))
-        self.key=self.fig.add_subplot(gs[3:, 1:])
+        self.key = self.fig.add_subplot(gs[3:, 1:])
         plt.title("Color Keyed")
-        self.img=self.key.imshow(self.frame.astype('uint8'))
-        self.hues=self.fig.add_subplot(gs[0:2, 0], polar=True)
+        self.img = self.key.imshow(self.frame.astype('uint8'))
+        self.hues = self.fig.add_subplot(gs[0:2, 0], polar=True)
         plt.title("Hues")
-        self.sats=self.fig.add_subplot(gs[2:4, 0])
+        self.sats = self.fig.add_subplot(gs[2:4, 0])
         plt.title("Saturations")
-        self.vals=self.fig.add_subplot(gs[4:, 0])
+        self.vals = self.fig.add_subplot(gs[4:, 0])
         plt.title("Values")
         self.fig.tight_layout()
 
-        self.hsv=self.rgb_to_hsv(self.frame)
+        self.hsv = self.rgb_to_hsv(self.frame)
 
-        self.hue_dist=list(np.histogram(
+        self.hue_dist = list(np.histogram(
             self.hsv[:, :, 0], 255, range=(0, 1), density=True))
-        self.hue_dist[0]=np.append(self.hue_dist[0], self.hue_dist[0][0])
-        self.sat_dist=np.histogram(
+        self.hue_dist[0] = np.append(self.hue_dist[0], self.hue_dist[0][0])
+        self.sat_dist = np.histogram(
             self.hsv[:, :, 1], 255, range=(0, 1), density=True)
-        self.val_dist=np.histogram(
+        self.val_dist = np.histogram(
             self.hsv[:, :, 2], 255, range=(0, 255), density=True)
 
         self.h_line, = self.hues.plot(
@@ -1471,94 +1480,94 @@ class ColorSelector():
         #     linspace(2*pi*self.colors[0][0], 2*pi*self.colors[1][0]),
         #     0, max(self.hue_dist[0]),
         #     color="blue", alpha=.3)
-        self.satspan=self.sats.axvspan(
+        self.satspan = self.sats.axvspan(
             self.colors[0][1], self.colors[1][1], color="red", alpha=.3)
-        self.valspan=self.vals.axvspan(
+        self.valspan = self.vals.axvspan(
             self.colors[0][2], self.colors[1][2], color="green", alpha=.3)
 
     def rgb_to_hsv(self, arr):
         if self.bw is False:
-            ret=colors.rgb_to_hsv(arr)
+            ret = colors.rgb_to_hsv(arr)
         else:
-            l, w=arr.shape
-            ret=np.repeat(arr, 3)
-            ret=ret.reshape((l, w, 3))
+            l, w = arr.shape
+            ret = np.repeat(arr, 3)
+            ret = ret.reshape((l, w, 3))
         return ret
 
     def select_color(self, dilate=5):
-        hsv=self.rgb_to_hsv(self.frame.copy())
-        self.hue_low=self.colors[:, 0].min()
-        self.hue_hi=self.colors[:, 0].max()
+        hsv = self.rgb_to_hsv(self.frame.copy())
+        self.hue_low = self.colors[:, 0].min()
+        self.hue_hi = self.colors[:, 0].max()
         # hue_low, hue_hi = np.percentile(self.hsv[:, 0], [.5, 99.5])
         # self.sats_low, self.sats_hi = np.percentile(self.hsv[:, 1], [2.5, 97.5])
-        self.sats_low, self.sats_hi=self.colors[:, 1].min(
+        self.sats_low, self.sats_hi = self.colors[:, 1].min(
         ), self.colors[:, 1].max()
         # self.vals_low, self.vals_hi = np.percentile(self.hsv[:, 2], [2.5, 97.5])
-        self.vals_low, self.vals_hi=self.colors[:, 2].min(
+        self.vals_low, self.vals_hi = self.colors[:, 2].min(
         ), self.colors[:, 2].max()
         if self.hue_low < 0:    # if range overlaps 0, use or logic
-            self.hue_low=1 + self.hue_low
-            comp_func=np.logical_or
+            self.hue_low = 1 + self.hue_low
+            comp_func = np.logical_or
         else:
-            comp_func=np.logical_and
-        hues=comp_func(
+            comp_func = np.logical_and
+        hues = comp_func(
             hsv[:, :, 0] > self.hue_low,
             hsv[:, :, 0] < self.hue_hi)
-        sats=np.logical_and(
+        sats = np.logical_and(
             hsv[:, :, 1] > self.sats_low,
             hsv[:, :, 1] < self.sats_hi)
-        vals=np.logical_and(
+        vals = np.logical_and(
             hsv[:, :, 2] > self.colors[:, 2].min(),
             hsv[:, :, 2] < self.colors[:, 2].max())
-        hues=ndimage.morphology.binary_dilation(
+        hues = ndimage.morphology.binary_dilation(
             hues,
             iterations=dilate).astype("uint8")
-        sats=ndimage.morphology.binary_dilation(
+        sats = ndimage.morphology.binary_dilation(
             sats,
             iterations=dilate).astype("uint8")
-        vals=ndimage.morphology.binary_dilation(
+        vals = ndimage.morphology.binary_dilation(
             vals,
             iterations=dilate).astype("uint8")
         if self.bw:
-            self.mask=vals
+            self.mask = vals
         else:
             if self.hue_only:
-                self.mask=hues
+                self.mask = hues
             else:
-                self.mask=np.logical_and(hues, sats, vals)
-        self.mask=ndimage.morphology.binary_dilation(
+                self.mask = np.logical_and(hues, sats, vals)
+        self.mask = ndimage.morphology.binary_dilation(
             self.mask,
             iterations=dilate).astype("uint8")
-        keyed=self.frame.copy()
-        keyed[self.mask == 0]=[0, 0, 0]
+        keyed = self.frame.copy()
+        keyed[self.mask == 0] = [0, 0, 0]
         return keyed
 
     def onselect(self, eclick, erelease):
         'eclick and erelease are matplotlib events at press and release'
-        self.select=self.frame[
+        self.select = self.frame[
             int(eclick.ydata):int(erelease.ydata),
             int(eclick.xdata):int(erelease.xdata)]
         if self.select.shape[0] != 0 and self.select.shape[1] != 0:
-            self.hsv=self.rgb_to_hsv(self.select)
+            self.hsv = self.rgb_to_hsv(self.select)
             # hsv = hsv.reshape((-1, 3)).transpose()
-            m=self.hsv[:, :, 1:].reshape((-1, 2)).mean(0)
-            sd=self.hsv[:, :, 1:].reshape((-1, 2)).std(0)
-            h_mean=stats.circmean(self.hsv[:, :, 0].flatten(), 0, 1)
-            h_std=stats.circstd(self.hsv[:, :, 0].flatten(), 0, 1)
-            m=np.append(h_mean, m)
-            sd=np.append(h_std, sd)
-            self.colors=np.array([m-3*sd, m+3*sd])
-            self.keyed=self.select_color()
+            m = self.hsv[:, :, 1:].reshape((-1, 2)).mean(0)
+            sd = self.hsv[:, :, 1:].reshape((-1, 2)).std(0)
+            h_mean = stats.circmean(self.hsv[:, :, 0].flatten(), 0, 1)
+            h_std = stats.circstd(self.hsv[:, :, 0].flatten(), 0, 1)
+            m = np.append(h_mean, m)
+            sd = np.append(h_std, sd)
+            self.colors = np.array([m-3*sd, m+3*sd])
+            self.keyed = self.select_color()
             self.img.set_array(self.keyed.astype('uint8'))
-            self.hue_dist=list(np.histogram(
+            self.hue_dist = list(np.histogram(
                 self.hsv[:, :, 0], 255,
                 range=(0, 1), density=True))
-            self.hue_dist[0]=np.append(
+            self.hue_dist[0] = np.append(
                 self.hue_dist[0], self.hue_dist[0][0])
-            self.sat_dist=np.histogram(
+            self.sat_dist = np.histogram(
                 self.hsv[:, : 1], 255,
                 range=(0, 1), density=True)
-            self.val_dist=np.histogram(
+            self.val_dist = np.histogram(
                 self.hsv[:, :, 2], 255,
                 range=(0, 255), density=True)
             self.h_line.set_ydata(self.hue_dist[0])
@@ -1593,13 +1602,13 @@ class ColorSelector():
             [x1, 0.]])
 
     def set_radius_span(self, a1, a2, R=1, n=100):
-        vals=np.linspace(a1, a2, n)
+        vals = np.linspace(a1, a2, n)
         vals.sort()
-        res=np.zeros(n*2+3)
-        res[[0, -1]]=vals.max()
-        res[1:n+1]=vals[::-1]
-        res[n+1]=vals.min()
-        res[n+2:2*n+2]=vals
+        res = np.zeros(n*2+3)
+        res[[0, -1]] = vals.max()
+        res[1:n+1] = vals[::-1]
+        res[n+1] = vals.min()
+        res[n+2:2*n+2] = vals
         return res
 
     def displaying(self):
@@ -1608,7 +1617,7 @@ class ColorSelector():
     def start_up(self):
         from matplotlib.widgets import RectangleSelector
 
-        self.RS=RectangleSelector(
+        self.RS = RectangleSelector(
             self.pic, self.onselect, drawtype="box")
         plt.connect('key_press_event', self.toggle_selector)
         plt.show()
