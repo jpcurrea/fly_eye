@@ -13,7 +13,7 @@ from skimage.draw import ellipse as Ellipse
 from skimage.feature import peak_local_max
 
 from numpy.linalg import eig, inv, norm
-from scipy import spatial, ndimage, stats, signal, interpolate, ndimage
+from scipy import interpolate, optimize, ndimage, signal, spatial, stats
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.measurements import center_of_mass
 
@@ -786,7 +786,7 @@ class Eye(Layer):
 
             xinds, yinds = np.meshgrid(
                 range(eye_fft.shape[1]), range(eye_fft.shape[0]))
-            ycenter, xcenter = np.array(eye_fft.shape)/2
+            ycenter, xcenter = (np.array(eye_fft.shape) - 1)/2
 
             xdiffs, ydiffs = xinds - xcenter, yinds - ycenter
             dists_2d = np.sqrt(xdiffs**2 + ydiffs**2)
@@ -822,31 +822,38 @@ class Eye(Layer):
             else:
                 reciprocal = abs(eye_fft_shifted)
                 midv, midh = np.round(np.array(reciprocal.shape)/2).astype(int)
-                pad = 5
+                pad = 2
                 newv = reciprocal[[midv-pad, midv+pad]].mean(0)
                 newh = reciprocal[:, [midh-pad, midh+pad]].mean(1)
                 reciprocal[midv - (pad - 1): midv + pad] = newv[np.newaxis]
                 reciprocal[:, midh - (pad - 1): midh +
                            pad] = newh[:, np.newaxis]
                 blurred = ndimage.gaussian_filter(
-                    dists_2d * reciprocal, sigma=15)
-                peaks = peak_local_max(blurred, num_peaks=20)
+                    dists_2d * reciprocal, sigma=10)
+                height, width = blurred.shape
+                lower_half = yinds[:, 0] <= height/2
+                peaks = peak_local_max(blurred[lower_half], num_peaks=20)
                 ys, xs = peaks.T
-                counts = []
+                # ys += height/2
+                # counts = []
                 dists = dists_2d[ys, xs]
-                for peak, dist in zip(peaks, dists):
-                    counts.append((dists == dist).sum())
-                counts = np.array(counts)
-                peaks = peaks[counts == 2]
-                dists = dists[counts == 2]
+                dists = dists[dists > 3]
+                # for peak, dist in zip(peaks, dists):
+                #     counts.append((dists == dist).sum())
+                # dist_matrix = dists[np.newaxis] - dists[:, np.newaxis]
+                # inds1, inds2 = optimize.linear_sum_assignment(dist_matrix)
+                # counts = np.array(counts)
+                # breakpoint()
+                # peaks = peaks[counts == 2]
+                # dists = dists[counts == 2]
                 i = np.argsort(dists)
-                self.fundamental_frequency = np.mean(dists[i][3:5])
+                self.fundamental_frequency = np.mean(dists[i][:3])
                 upper_bound = 1.5 * self.fundamental_frequency
                 self.upper_bound = upper_bound
-                xs, ys = xs[i], ys[i]
-                # plt.imshow(dists_2d * blurred)
-                # plt.scatter(xs, ys)
-                # plt.show()
+                # xs, ys = xs[i], ys[i]
+                plt.imshow(dists_2d * blurred)
+                plt.scatter(xs, ys)
+                plt.show()
                 # sbn.distplot(dists_2d[ys, xs])
                 # plt.show()
                 # breakpoint()
