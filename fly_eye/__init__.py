@@ -843,7 +843,6 @@ class Eye(Layer):
                 # dist_matrix = dists[np.newaxis] - dists[:, np.newaxis]
                 # inds1, inds2 = optimize.linear_sum_assignment(dist_matrix)
                 # counts = np.array(counts)
-                # breakpoint()
                 # peaks = peaks[counts == 2]
                 # dists = dists[counts == 2]
                 i = np.argsort(dists)
@@ -856,7 +855,6 @@ class Eye(Layer):
                 plt.show()
                 # sbn.distplot(dists_2d[ys, xs])
                 # plt.show()
-                # breakpoint()
             in_range = dists_2d < upper_bound
             weights = np.ones(dists_2d.shape)
             weights[in_range == False] = 0
@@ -921,10 +919,11 @@ class Eye(Layer):
                 self.ommatidia = None
 
     def get_ommatidial_diameter(self, k_neighbors=7, radius=100,
-                                white_peak=True, min_facets=500, max_facets=50000):
+                                white_peak=True, min_facets=500, max_facets=50000,
+                                method=0):
         if self.ommatidia is None:
             self.get_ommatidia(white_peak=white_peak, min_facets=min_facets,
-                               max_facets=max_facets)
+                               max_facets=max_facets, method=method)
         if self.ommatidia is not None:
             self.tree = spatial.KDTree(self.ommatidia.T)
             dists, inds = self.tree.query(self.ommatidia.T, k=k_neighbors+1)
@@ -1066,7 +1065,6 @@ class Stack():
                 # fig = plt.figure()
                 # ax = fig.add_subplot(111, projection='3d')
                 # ax.scatter(xgrid, ygrid, self.heights)
-                # breakpoint()
                 if interpolate_heights:
                     down = np.floor(h)
                     up = np.ceil(h)
@@ -1142,7 +1140,7 @@ class EyeStack(Stack):
         # self.eye = Eye(self.eye.eye)
 
     def get_3d_data(self, averaging_range=5, white_peak=True,
-                    min_facets=500, max_facets=5000):
+                    min_facets=500, max_facets=5000, method=0):
         if self.stack is None:
             self.get_eye_stack()
         height, width = self.heights.shape
@@ -1201,11 +1199,11 @@ class EyeStack(Stack):
         incl_new = np.linspace(
             self.inclination.min(),
             self.inclination.max(),
-            incl_range / resolution)
+            int(round(incl_range / resolution)))
         azim_new = np.linspace(
             self.azimuth.min(),
             self.azimuth.max(),
-            azim_range / resolution)
+            int(round(azim_range / resolution)))
         incl_new, azim_new = np.meshgrid(incl_new, azim_new)
         # 2. sample data and interpolate into a grid image
         pred = np.array([self.inclination, self.azimuth])
@@ -1242,11 +1240,11 @@ class EyeStack(Stack):
         self.flat_eye = Eye(
             self.flat_eye, pixel_size=self.polar_grid_resolution,
             mask=polar_mask_grid)
-        # breakpoint()
         # self.eye = Eye(
         # in polar coordinates, distances correspond to angles in cartesian space
         self.flat_eye.get_ommatidial_diameter(white_peak=white_peak,
-                                              min_facets=min_facets, max_facets=max_facets)
+                                              min_facets=min_facets, max_facets=max_facets,
+                                              method=method)
         if self.flat_eye.ommatidia is not None:
             # interommatidial_ange in degrees
             self.io_angle_flat_approx = self.flat_eye.ommatidial_diameter * 180. / np.pi
@@ -1256,7 +1254,8 @@ class EyeStack(Stack):
             # ommatidial diameter, io angle, and ommatidial counts can be approximated
             # from the projected image as well. these will be treated as approximations
             self.eye.eye.get_ommatidial_diameter(white_peak=white_peak,
-                                                 min_facets=min_facets, max_facets=max_facets)
+                                                 min_facets=min_facets, max_facets=max_facets,
+                                                 method=method)
             self.ommatidial_diameter = self.eye.eye.ommatidial_diameter
             self.ommatidial_count = len(self.eye.eye.ommatidia[0])
             if self.radius > self.ommatidial_diameter:
@@ -1264,7 +1263,6 @@ class EyeStack(Stack):
                     self.ommatidial_diameter/(2 * self.radius)) * 180 / np.pi
             else:
                 self.io_angle_spherical_approx = np.nan
-            breakpoint()
             ommatidia_zs = []
             ommatidia_xs, ommatidia_zs = self.eye.eye.ommatidia
 
