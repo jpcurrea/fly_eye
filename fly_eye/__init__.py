@@ -771,7 +771,7 @@ class Eye(Layer):
                 return self.eye
 
     def get_ommatidia(self, white_peak=True, min_facets=500, max_facets=50000,
-                      crop=True, method=0):
+                      crop=True, method=0, method1_sigma=5):
         if self.image is None:
             self.load_image()
         if self.bw is False:
@@ -829,7 +829,7 @@ class Eye(Layer):
                 reciprocal[:, midh - (pad - 1): midh +
                            pad] = newh[:, np.newaxis]
                 blurred = ndimage.gaussian_filter(
-                    dists_2d * reciprocal, sigma=10)
+                    dists_2d * reciprocal, sigma=method1_sigma)
                 height, width = blurred.shape
                 lower_half = yinds[:, 0] <= height/2
                 peaks = peak_local_max(blurred[lower_half], num_peaks=20)
