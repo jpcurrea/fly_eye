@@ -1251,7 +1251,7 @@ class EyeStack(Stack):
         self.eye.eye.get_ommatidial_diameter(white_peak=white_peak,
                                              min_facets=min_facets, max_facets=max_facets,
                                              method=method)
-        if (self.flat_eye.ommatidia is not None or self.eye.eye.ommatidia is not None):
+        if self.flat_eye.ommatidia is not None:
             # interommatidial_ange in degrees
             self.io_angle_flat_approx = self.flat_eye.ommatidial_diameter * 180. / np.pi
             # ommatidial diameter in mm
@@ -1259,6 +1259,7 @@ class EyeStack(Stack):
                 self.flat_eye.ommatidial_diameter
             # ommatidial diameter, io angle, and ommatidial counts can be approximated
             # from the projected image as well. these will be treated as approximations
+        if self.eye.eye.ommatidia is not None:
             self.ommatidial_diameter = self.eye.eye.ommatidial_diameter
             self.ommatidial_count = len(self.eye.eye.ommatidia[0])
             if self.radius > self.ommatidial_diameter:
@@ -1268,14 +1269,13 @@ class EyeStack(Stack):
                 self.io_angle_spherical_approx = np.nan
             ommatidia_zs = []
             ommatidia_xs, ommatidia_zs = self.eye.eye.ommatidia
-
-            # vertical field of view using the major axis of the flat eye, in degrees
-            self.fov_vertical = self.flat_eye.eye_length * 180. / np.pi
-            # horizontal field of view using the minor axis of the flat eye, in degrees
-            self.fov_horizontal = self.flat_eye.eye_width * 180. / np.pi
-            # field of view approximating the area as an ellipse, in steradians
-            self.fov = np.pi * (self.flat_eye.eye_width / 2) * \
-                (self.flat_eye.eye_length / 2)
+        # vertical field of view using the major axis of the flat eye, in degrees
+        self.fov_vertical = self.flat_eye.eye_length * 180. / np.pi
+        # horizontal field of view using the minor axis of the flat eye, in degrees
+        self.fov_horizontal = self.flat_eye.eye_width * 180. / np.pi
+        # field of view approximating the area as an ellipse, in steradians
+        self.fov = np.pi * (self.flat_eye.eye_width / 2) * \
+            (self.flat_eye.eye_length / 2)
 
 
 class Video(Stack):
