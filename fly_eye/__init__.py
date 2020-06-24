@@ -1248,7 +1248,10 @@ class EyeStack(Stack):
         self.flat_eye.get_ommatidial_diameter(white_peak=white_peak,
                                               min_facets=min_facets, max_facets=max_facets,
                                               method=method)
-        if self.flat_eye.ommatidia is not None:
+        self.eye.eye.get_ommatidial_diameter(white_peak=white_peak,
+                                             min_facets=min_facets, max_facets=max_facets,
+                                             method=method)
+        if (self.flat_eye.ommatidia is not None or self.eye.eye.ommatidia is not None):
             # interommatidial_ange in degrees
             self.io_angle_flat_approx = self.flat_eye.ommatidial_diameter * 180. / np.pi
             # ommatidial diameter in mm
@@ -1256,9 +1259,6 @@ class EyeStack(Stack):
                 self.flat_eye.ommatidial_diameter
             # ommatidial diameter, io angle, and ommatidial counts can be approximated
             # from the projected image as well. these will be treated as approximations
-            self.eye.eye.get_ommatidial_diameter(white_peak=white_peak,
-                                                 min_facets=min_facets, max_facets=max_facets,
-                                                 method=method)
             self.ommatidial_diameter = self.eye.eye.ommatidial_diameter
             self.ommatidial_count = len(self.eye.eye.ommatidia[0])
             if self.radius > self.ommatidial_diameter:
