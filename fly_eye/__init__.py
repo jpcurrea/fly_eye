@@ -814,7 +814,10 @@ class Eye(Layer):
                 i = np.logical_and(
                     fs >= min_fs,
                     fs <= max_fs)
-                optimum = np.argmax((fs*peaks)[i])
+                optima = peak_local_max((fs * peaks)[i],
+                                        min_distance=5)
+                # optimum = np.argmax((fs*peaks)[i])
+                optimum = min(optima)
                 optimum = fs[i][optimum]
                 self.fundamental_frequency = optimum
                 upper_bound = 1.5 * optimum
@@ -862,7 +865,7 @@ class Eye(Layer):
 
             # using the gaussian weights, invert back to the filtered image
             selection_shifted = np.zeros(eye_fft.shape, dtype=complex)
-            selection_shifted = eye_fft_shifted*weights
+            selection_shifted = eye_fft_shifted*self.weights
             selection_fft = np.fft.ifftshift(selection_shifted)
             selection = np.fft.ifft2(selection_fft)
 
