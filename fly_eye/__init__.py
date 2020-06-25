@@ -820,7 +820,7 @@ class Eye(Layer):
                 optimum = min(optima)
                 optimum = fs[i][optimum]
                 self.fundamental_frequency = optimum
-                upper_bound = 2 * optimum
+                upper_bound = 2.5 * optimum
                 self.upper_bound = upper_bound
             else:
                 reciprocal = abs(eye_fft_shifted)
@@ -850,7 +850,7 @@ class Eye(Layer):
                 # dists = dists[counts == 2]
                 i = np.argsort(dists)
                 self.fundamental_frequency = np.mean(dists[i][:3])
-                upper_bound = 2 * self.fundamental_frequency
+                upper_bound = 2.5 * self.fundamental_frequency
                 self.upper_bound = upper_bound
                 # xs, ys = xs[i], ys[i]
                 plt.imshow(dists_2d * blurred)
