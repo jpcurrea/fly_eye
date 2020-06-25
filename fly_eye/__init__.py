@@ -17,8 +17,6 @@ from scipy import interpolate, optimize, ndimage, signal, spatial, stats
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.measurements import center_of_mass
 
-from rolling_window import rolling_window
-
 
 def rgb_2_gray(rgb):
     return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
