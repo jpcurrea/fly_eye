@@ -392,6 +392,21 @@ def load_Points(fn):
     return out
 
 
+def fit_line(data, component=0):             # fit 3d line to 3d data
+    """Use singular value decomposition (SVD) to find the best fitting vector to the data.
+
+
+    Keyword arguments:
+    data -- input data points
+    component -- the order of the axis used to decompose the data (default 0 => the first component vector which represents the plurality of the data
+    """
+
+    m = data.mean(0)
+    max_val = np.round(2*abs(data - m).max()).astype(int)
+    uu, dd, vv = np.linalg.svd(data - m)
+    return vv[component]
+
+
 class Points():
     """Stores coordinate data in both cartesian and spherical coordinates.
 

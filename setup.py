@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name="fly_eye",
-      version='0.3.8',
+      version='0.3.9',
       description='tools for anayzing images and video (as image stacks),\
       particularly for motion tracking, color keying, and processing of fruit\
       fly eye images.',
