@@ -9,7 +9,7 @@ setup(name="fly_eye",
       author='Pablo Currea',
       author_email='johnpaulcurrea@gmail.com',
       license='MIT',
-      packages=['fly_eye', 'rolling_window'],
+      packages=['fly_eye'],
       install_requires=[
           'numpy',
           'scipy',
