@@ -866,9 +866,9 @@ class Eye(Layer):
                 upper_bound = 1.5 * self.fundamental_frequency
                 self.upper_bound = upper_bound
                 # xs, ys = xs[i], ys[i]
-                plt.imshow(dists_2d * blurred)
-                plt.scatter(xs, ys)
-                plt.show()
+                #plt.imshow(dists_2d * blurred)
+                #plt.scatter(xs, ys)
+                #plt.show()
                 # sbn.distplot(dists_2d[ys, xs])
                 # plt.show()
             in_range = dists_2d < upper_bound
